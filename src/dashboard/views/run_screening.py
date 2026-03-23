@@ -14,6 +14,10 @@ from src.config.settings import settings
 import streamlit as st
 
 
+# Persistent executor — never shut down, survives Streamlit rerenders
+_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="screening")
+
+
 def _run(coro, timeout: int = 1800):
     def _target():
         loop = asyncio.new_event_loop()
@@ -22,18 +26,23 @@ def _run(coro, timeout: int = 1800):
             return loop.run_until_complete(coro)
         finally:
             loop.close()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-        future = ex.submit(_target)
-        try:
-            return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            raise RuntimeError(f"Operation timed out after {timeout}s")
-        except Exception:
-            raise
+    future = _EXECUTOR.submit(_target)
+    try:
+        return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        raise RuntimeError(f"Operation timed out after {timeout}s")
 
 
 def _engine_factory():
-    engine = create_async_engine(settings.db.dsn, echo=False)
+    engine = create_async_engine(
+        settings.db.dsn,
+        echo=False,
+        pool_size=2,
+        max_overflow=2,
+        pool_timeout=30,
+        pool_recycle=300,      # recycle connections every 5 min
+        pool_pre_ping=True,    # test connection before use
+    )
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     return engine, factory
 

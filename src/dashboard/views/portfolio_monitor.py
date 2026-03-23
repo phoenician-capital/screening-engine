@@ -22,7 +22,7 @@ def _run(coro, timeout: int = 120):
             return loop.run_until_complete(coro)
         finally:
             loop.close()
-    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+    ex = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="dashboard")
         return ex.submit(_target).result(timeout=timeout)
 
 
