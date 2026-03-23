@@ -66,6 +66,17 @@ class UniverseExpander:
             exclude_tickers=existing_tickers,
         )
 
+        from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+        from src.config.settings import settings
+
+        # Create a fresh engine + session factory for storing results
+        # This avoids stale connections from the long-running screen_universe_global call
+        engine = create_async_engine(
+            settings.db.dsn, echo=False,
+            pool_pre_ping=True, pool_recycle=300,
+        )
+        factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
         tickers_added: list[str] = []
         for r in results:
             ticker = r.get("company", {}).get("ticker", "?")
@@ -73,24 +84,26 @@ class UniverseExpander:
                 co_info = r["company"]
                 metrics = r["metrics"]
 
-                # Each company is committed independently — one failure
-                # does not affect others.
-                await self.company_repo.upsert(co_info)
-                await self.session.flush()  # ensure company row exists before metric FK
-
-                metric = Metric(
-                    ticker      = ticker,
-                    period_end  = dt.date.today(),
-                    period_type = "snapshot",
-                    **{k: v for k, v in metrics.items() if k != "ticker"},
-                )
-                self.session.add(metric)
-                await self.session.commit()
+                # Fresh session per company — avoids stale connection errors
+                async with factory() as session:
+                    co_repo = CompanyRepository(session)
+                    met_repo = MetricRepository(session)
+                    await co_repo.upsert(co_info)
+                    await session.flush()
+                    metric = Metric(
+                        ticker      = ticker,
+                        period_end  = dt.date.today(),
+                        period_type = "snapshot",
+                        **{k: v for k, v in metrics.items() if k != "ticker"},
+                    )
+                    session.add(metric)
+                    await session.commit()
                 tickers_added.append(ticker)
 
             except Exception as e:
                 logger.warning("Failed to store %s — rolling back: %s", ticker, e)
-                await self.session.rollback()
+
+        await engine.dispose()
         logger.info("Universe build complete: %d companies stored", len(tickers_added))
         return tickers_added
 

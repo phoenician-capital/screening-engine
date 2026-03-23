@@ -14,23 +14,41 @@ from src.config.settings import settings
 import streamlit as st
 
 
-# Persistent executor — never shut down, survives Streamlit rerenders
-_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=4, thread_name_prefix="screening")
-
-
 def _run(coro, timeout: int = 1800):
+    """Run a coroutine in a completely isolated thread with its own event loop."""
+    import threading
+    result_holder = [None]
+    error_holder  = [None]
+    done_event    = threading.Event()
+
     def _target():
+        # Completely fresh event loop — no shared state with Streamlit
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(coro)
+            result_holder[0] = loop.run_until_complete(coro)
+        except Exception as e:
+            error_holder[0] = e
         finally:
-            loop.close()
-    future = _EXECUTOR.submit(_target)
-    try:
-        return future.result(timeout=timeout)
-    except concurrent.futures.TimeoutError:
+            try:
+                # Cancel all pending tasks cleanly
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            finally:
+                loop.close()
+            done_event.set()
+
+    t = threading.Thread(target=_target, daemon=True)
+    t.start()
+    finished = done_event.wait(timeout=timeout)
+    if not finished:
         raise RuntimeError(f"Operation timed out after {timeout}s")
+    if error_holder[0]:
+        raise error_holder[0]
+    return result_holder[0]
 
 
 def _engine_factory():
