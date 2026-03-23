@@ -12,26 +12,20 @@ services:
         value: production
       - key: LOG_LEVEL
         value: INFO
+      # ── Supabase Database ────────────────────────────────────────────────────
       - key: DB_HOST
-        fromDatabase:
-          name: screening-engine-db
-          property: host
+        value: db.ftkgqkomxikkcwytevha.supabase.co
       - key: DB_PORT
-        fromDatabase:
-          name: screening-engine-db
-          property: port
+        value: "5432"
       - key: DB_NAME
-        fromDatabase:
-          name: screening-engine-db
-          property: database
+        value: postgres
       - key: DB_USER
-        fromDatabase:
-          name: screening-engine-db
-          property: user
+        value: postgres
       - key: DB_PASSWORD
-        fromDatabase:
-          name: screening-engine-db
-          property: password
+        sync: false
+      - key: DB_SSL
+        value: "require"
+      # ── Redis ────────────────────────────────────────────────────────────────
       - key: REDIS_HOST
         fromService:
           name: screening-engine-redis
@@ -102,25 +96,17 @@ services:
     plan: starter
     envVars:
       - key: DB_HOST
-        fromDatabase:
-          name: screening-engine-db
-          property: host
+        value: db.ftkgqkomxikkcwytevha.supabase.co
       - key: DB_PORT
-        fromDatabase:
-          name: screening-engine-db
-          property: port
+        value: "5432"
       - key: DB_NAME
-        fromDatabase:
-          name: screening-engine-db
-          property: database
+        value: postgres
       - key: DB_USER
-        fromDatabase:
-          name: screening-engine-db
-          property: user
+        value: postgres
       - key: DB_PASSWORD
-        fromDatabase:
-          name: screening-engine-db
-          property: password
+        sync: false
+      - key: DB_SSL
+        value: "require"
       - key: REDIS_HOST
         fromService:
           name: screening-engine-redis
@@ -134,11 +120,3 @@ services:
     name: screening-engine-redis
     plan: starter
     maxmemoryPolicy: noeviction
-
-databases:
-  # ── PostgreSQL ────────────────────────────────────────────────────────────────
-  - name: screening-engine-db
-    plan: starter
-    databaseName: phoenician
-    user: phoenician
-    postgresMajorVersion: "16"

@@ -22,14 +22,21 @@ class DatabaseSettings:
     name: str = os.getenv("DB_NAME", "phoenician")
     user: str = os.getenv("DB_USER", "phoenician")
     password: str = os.getenv("DB_PASSWORD", "")
+    ssl: str = os.getenv("DB_SSL", "")
 
     @property
     def dsn(self) -> str:
-        return f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
+        base = f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
+        if self.ssl:
+            base += f"?ssl={self.ssl}"
+        return base
 
     @property
     def sync_dsn(self) -> str:
-        return f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
+        base = f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
+        if self.ssl:
+            base += f"?sslmode={self.ssl}"
+        return base
 
 
 @dataclass(frozen=True)
