@@ -16,11 +16,20 @@ MIGRATIONS_DIR = Path(__file__).parent.parent / "src" / "db" / "migrations"
 
 
 async def run_migrations():
-    dsn = (
-        f"postgresql://{os.environ['DB_USER']}:{os.environ['DB_PASSWORD']}"
-        f"@{os.environ['DB_HOST']}:{os.environ.get('DB_PORT', '5432')}"
-        f"/{os.environ['DB_NAME']}"
-    )
+    db_user = os.getenv("DB_USER")
+    db_password = os.getenv("DB_PASSWORD")
+    db_host = os.getenv("DB_HOST")
+    db_port = os.getenv("DB_PORT", "5432")
+    db_name = os.getenv("DB_NAME")
+
+    if not all([db_user, db_password, db_host, db_name]):
+        logger.info("DB env vars not set — skipping migrations")
+        return
+
+    ssl = os.getenv("DB_SSL", "")
+    dsn = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
+    if ssl:
+        dsn += f"?ssl={ssl}"
 
     conn = await asyncpg.connect(dsn)
     try:
