@@ -1,0 +1,12 @@
+Analyze the following text and extract specific investment-relevant claims/signals.
+
+For EACH claim found, return a JSON object with:
+- "type": one of {{ claim_types | join(', ') }}
+- "text": the exact quote or close paraphrase (max 200 chars)
+- "confidence": 0.0 to 1.0
+- "sentiment": "positive" | "negative" | "neutral"
+
+Return a JSON array of claims. Return [] if none found.
+
+TEXT:
+{{ text }}

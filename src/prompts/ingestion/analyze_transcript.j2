@@ -1,0 +1,36 @@
+Analyze the following earnings call transcript(s) for {{ ticker }} and extract management quality signals.
+
+Transcripts ({{ num_quarters }} quarters):
+---
+{{ transcript_text }}
+---
+
+Extract the following signals based on the most recent quarter if multiple are provided:
+
+1. guidance_direction: Did management raise, maintain, lower, or withdraw guidance?
+   Options: "raised", "maintained", "lowered", "withdrawn", "not_provided"
+
+2. management_tone: How would you characterize management's tone overall?
+   Options: "confident", "neutral", "cautious", "defensive"
+   - confident: Clear conviction, specific targets, minimal hedging
+   - neutral: Balanced, factual, moderate hedging
+   - cautious: Heavy qualifications, macro uncertainty emphasized
+   - defensive: Evasive on questions, deflecting, explaining away misses
+
+3. margin_commentary: What is management saying about gross/operating margins?
+   Options: "expanding", "stable", "contracting"
+
+4. competitive_positioning: Based on comments about competition, market share, pricing power:
+   Options: "strengthening", "stable", "weakening"
+
+5. summary: Write 2-3 sentences summarizing the key takeaways from the call for a fundamental investor.
+
+Respond ONLY with valid JSON:
+{
+  "guidance_direction": "<value>",
+  "management_tone": "<value>",
+  "margin_commentary": "<value>",
+  "competitive_positioning": "<value>",
+  "summary": "<2-3 sentence summary>",
+  "quarters_analyzed": {{ quarters_list | tojson }}
+}

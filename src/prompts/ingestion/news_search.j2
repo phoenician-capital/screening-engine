@@ -1,0 +1,9 @@
+Search for recent financial news: {{ query }}.
+{% if tickers %}Tickers: {{ tickers | join(', ') }}.{% endif %}
+{% if date_from %}Since {{ date_from }}.{% endif %}
+Return up to {{ limit }} results. For each result, provide:
+TITLE: <title>
+URL: <url>
+DATE: <date>
+SNIPPET: <2-3 sentence summary>
+---

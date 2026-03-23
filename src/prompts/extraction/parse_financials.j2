@@ -1,0 +1,25 @@
+Extract the following financial metrics from the text below.
+Return ONLY a valid JSON object with these keys (use null if not found):
+
+{
+  "revenue": <number or null>,
+  "gross_profit": <number or null>,
+  "gross_margin": <decimal 0-1 or null>,
+  "ebit": <number or null>,
+  "ebit_margin": <decimal 0-1 or null>,
+  "net_income": <number or null>,
+  "fcf": <number or null>,
+  "capex": <number or null>,
+  "net_debt": <number or null>,
+  "total_assets": <number or null>,
+  "roic": <decimal 0-1 or null>,
+  "revenue_growth": <decimal or null>,
+  "insider_ownership_pct": <decimal 0-1 or null>,
+  "confidence": <0.0-1.0>,
+  "source_lines": [<key sentences used>]
+}
+
+All monetary values in USD. Convert if needed.
+
+TEXT:
+{{ text }}

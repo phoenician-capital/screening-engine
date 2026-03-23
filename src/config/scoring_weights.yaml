@@ -1,0 +1,228 @@
+# ------------------------------------------------------------------
+# Phoenician Capital – Scoring Weights Configuration
+# Editable at runtime via Settings page — changes take effect on next run.
+# ------------------------------------------------------------------
+
+version: 2
+
+# ── Category weights (must sum to 100) ───────────────────────────
+categories:
+
+  founder_ownership:
+    weight: 20
+    sub_criteria:
+      founder_led:
+        max_points: 8
+        description: "CEO is founder or family member with meaningful stake"
+      insider_ownership:
+        max_points: 6
+        thresholds:
+          excellent: 0.20   # ≥ 20% = full points
+          good: 0.10        # ≥ 10%
+          weak: 0.01        # any ownership
+      recent_insider_buying:
+        max_points: 4
+        description: "Insider buying activity in last 3 years"
+        lookback_years: 3
+      insider_conviction:
+        max_points: 2
+        description: "Cluster insider buying near 52-week low"
+        cluster_window_days: 14
+        min_transaction_usd: 50000
+        strong_transaction_usd: 1000000
+
+  business_quality:
+    weight: 25
+    sub_criteria:
+      gross_margin:
+        max_points: 5
+        thresholds:
+          excellent: 0.70   # ≥ 70%
+          good: 0.50        # ≥ 50%
+          moderate: 0.30    # ≥ 30%
+          weak: 0.15        # ≥ 15% (hard filter floor)
+      operating_margin:
+        max_points: 4
+        thresholds:
+          excellent: 0.25   # ≥ 25%
+          good: 0.15        # ≥ 15%
+          weak: 0.10        # ≥ 10%
+      roa_roe:
+        max_points: 4
+        description: "ROA ≥ 5–15% or ROE ≥ 10–45% (best of both)"
+        thresholds:
+          roa_excellent: 0.15
+          roa_good: 0.08
+          roa_weak: 0.05
+          roe_excellent: 0.35
+          roe_good: 0.20
+          roe_weak: 0.10
+      revenue_growth:
+        max_points: 5
+        thresholds:
+          excellent: 0.20   # ≥ 20% YoY
+          good: 0.12        # ≥ 12%
+          weak: 0.08        # ≥ 8% (baseline target)
+      margin_expansion:
+        max_points: 3
+        description: "Net income growing faster than revenue"
+        # bonus points — not a disqualifier
+      management_quality_signal:
+        max_points: 4
+        description: "LLM-extracted earnings transcript signals"
+
+  unit_economics:
+    weight: 20
+    sub_criteria:
+      fcf_positive:
+        max_points: 4
+        description: "Positive free cash flow"
+      fcf_yield:
+        max_points: 6
+        thresholds:
+          excellent: 0.08   # ≥ 8%
+          good: 0.05        # ≥ 5%
+          weak: 0.03        # ≥ 3%
+      fcf_to_net_income:
+        max_points: 5
+        description: "FCF/Net Income ≥ 0.7 indicates high earnings quality"
+        thresholds:
+          excellent: 0.90
+          good: 0.70
+          weak: 0.50
+      low_capex_intensity:
+        max_points: 5
+        thresholds:
+          excellent: 0.05   # capex/revenue ≤ 5%
+          good: 0.10        # ≤ 10%
+          weak: 0.15        # ≤ 15%
+
+  valuation_asymmetry:
+    weight: 15
+    sub_criteria:
+      ev_ebitda:
+        max_points: 5
+        thresholds:
+          excellent: 8      # ≤ 8x
+          good: 13          # ≤ 13x
+          fair: 18          # ≤ 18x
+      price_to_fcf:
+        max_points: 5
+        thresholds:
+          excellent: 12     # ≤ 12x
+          good: 20          # ≤ 20x
+          fair: 30          # ≤ 30x
+      peg_ratio:
+        max_points: 5
+        thresholds:
+          excellent: 0.8    # ≤ 0.8
+          good: 1.3         # ≤ 1.3
+          fair: 2.0         # ≤ 2.0
+
+  information_edge:
+    weight: 10
+    sub_criteria:
+      analyst_coverage:
+        max_points: 6
+        thresholds:
+          excellent: 2      # ≤ 2 analysts
+          good: 5           # ≤ 5
+          weak: 10          # ≤ 10
+      market_cap_sweet_spot:
+        max_points: 4
+        description: "Sweet spot: $300M–$3B (under-followed)"
+        min_usd: 300000000
+        max_usd: 3000000000
+
+  scalability:
+    weight: 10
+    sub_criteria:
+      recurring_revenue:
+        max_points: 6
+        description: "Recurring/subscription revenue share"
+        thresholds:
+          excellent: 0.80   # ≥ 80%
+          good: 0.60        # ≥ 60%
+          weak: 0.40        # ≥ 40%
+      international_expansion:
+        max_points: 4
+        description: "Geographic revenue diversification"
+
+# ── Risk scoring (higher = riskier, deducted from rank) ─────────
+risk_criteria:
+  leverage:
+    max_points: 25
+    thresholds:
+      low: 2.0              # ≤ 2x = low risk
+      medium: 3.0           # ≤ 3x
+      high: 4.0             # > 4x = high risk
+  unprofitable:
+    max_points: 20
+    description: "Company not profitable (net income < 0)"
+  earnings_quality:
+    max_points: 15
+    description: "FCF/Net Income < 0.5 signals low earnings quality"
+    threshold: 0.50
+  customer_concentration:
+    max_points: 15
+  geographic_risk:
+    max_points: 15
+    description: "Higher-risk emerging market domicile"
+    high_risk_countries:
+      - "BR"   # Brazil
+      - "IN"   # India
+      - "MX"   # Mexico
+      - "ID"   # Indonesia
+      - "TR"   # Turkey
+      - "CN"   # China (mainland)
+      - "RU"   # Russia
+      - "IR"   # Iran
+      - "KP"   # North Korea
+      - "SY"   # Syria
+      - "BY"   # Belarus
+  red_flags:
+    max_points: 10
+    description: "Regulatory issues, litigation, accounting restatements"
+
+# ── Hard disqualifiers ───────────────────────────────────────────
+hard_filters:
+  # Market cap
+  min_market_cap_usd: 100000000          # $100M
+  max_market_cap_usd: 10000000000        # $10B
+
+  # Quality floors
+  min_gross_margin: 0.15                 # 15% floor
+  min_avg_daily_volume_usd: 500000       # $500K/day
+
+  # Leverage cap
+  max_leverage: 5.0                      # net_debt/EBITDA
+
+  # Excluded sectors (GICS codes)
+  excluded_gics_sectors:
+    - "10"   # Energy
+    - "55"   # Utilities
+    - "40"   # Financials (banks, BDCs, insurance, REITs — not Phoenician mandate)
+    - "60"   # Real Estate (REITs)
+
+  # Excluded countries
+  excluded_countries:
+    - "CN"   # China mainland
+    - "RU"   # Russia
+    - "IR"   # Iran
+    - "KP"   # North Korea
+    - "SY"   # Syria
+    - "BY"   # Belarus
+
+  # Require profitability — exclude companies with negative net income
+  require_profitable: true
+
+  # Minimum composite score to include in output
+  min_composite_score: 20
+
+# ── Ranking formula ──────────────────────────────────────────────
+ranking:
+  fit_weight: 0.70
+  risk_penalty_weight: 0.30
+  top_n_results: 5                       # top N per run
+  feedback_decay_per_reject: 0.02
+  feedback_boost_per_accept: 0.03

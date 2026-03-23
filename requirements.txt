@@ -1,0 +1,44 @@
+# ── Core framework ────────────────────────────────────────────────
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+pydantic==2.10.4
+python-dotenv==1.0.1
+
+# ── Database ─────────────────────────────────────────────────────
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+psycopg2-binary==2.9.10
+pgvector==0.3.6
+alembic==1.14.1
+
+# ── Task queue ───────────────────────────────────────────────────
+celery[redis]==5.4.0
+redis==5.2.1
+
+# ── LLM clients ─────────────────────────────────────────────────
+anthropic>=0.80.0
+openai==1.58.1
+google-generativeai==0.8.4
+
+# ── Data / HTTP ──────────────────────────────────────────────────
+httpx==0.28.1
+yfinance==0.2.51
+pandas==2.2.3
+
+# ── Embeddings / Vector ─────────────────────────────────────────
+# (OpenAI embeddings via openai package above)
+
+# ── Configuration / Templating ───────────────────────────────────
+pyyaml==6.0.2
+jinja2==3.1.5
+
+# ── Dashboard ────────────────────────────────────────────────────
+streamlit==1.41.1
+
+# ── Scheduling ───────────────────────────────────────────────────
+apscheduler==3.10.4
+
+# ── Dev / testing ────────────────────────────────────────────────
+pytest==8.3.4
+pytest-asyncio==0.25.0
+ruff==0.8.6

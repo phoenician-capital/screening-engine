@@ -1,0 +1,77 @@
+services:
+  # ── PostgreSQL + pgvector ────────────────────────────────────
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_DB: phoenician
+      POSTGRES_USER: phoenician
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-phoenician_dev}
+    ports:
+      - "5433:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./src/db/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_schema.sql
+      - ./src/db/migrations/002_insider_price_alerts.sql:/docker-entrypoint-initdb.d/002_schema.sql
+      - ./src/db/migrations/003_widen_sector_columns.sql:/docker-entrypoint-initdb.d/003_schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phoenician"]
+      interval: 5s
+      retries: 5
+
+  # ── Redis ────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+
+  # ── MCP Server (FastAPI) ─────────────────────────────────────
+  mcp-server:
+    build: .
+    command: uvicorn src.mcp_server.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: phoenician
+      DB_USER: phoenician
+      DB_PASSWORD: ${DB_PASSWORD:-phoenician_dev}
+      REDIS_HOST: redis
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    working_dir: /app
+
+  # ── Streamlit Dashboard ──────────────────────────────────────
+  dashboard:
+    build: .
+    command: streamlit run src/dashboard/app.py --server.port 5000 --server.address 0.0.0.0
+    ports:
+      - "5000:5000"
+    env_file:
+      - .env
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: phoenician
+      DB_USER: phoenician
+      DB_PASSWORD: ${DB_PASSWORD:-phoenician_dev}
+      REDIS_HOST: redis
+    depends_on:
+      - mcp-server
+    volumes:
+      - .:/app
+    working_dir: /app
+
+volumes:
+  pgdata:

@@ -1,0 +1,29 @@
+Write a 1–2 page investment memo for the company below.
+
+COMPANY: {{ name }} ({{ ticker }}) | {{ country }} | Market Cap: ${{ market_cap }}M
+EXCHANGE: {{ exchange }}
+FIT SCORE: {{ fit_score }}/100 | RISK SCORE: {{ risk_score }}/100
+
+──── DNA ALIGNMENT ────
+{{ dna_section }}
+
+──── FINANCIAL SNAPSHOT ────
+{{ financial_section }}
+
+──── SOURCE CONTEXT (cite by [N]) ────
+{% if context_block %}
+{{ context_block }}
+{% else %}
+[No source documents available yet]
+{% endif %}
+
+──── REQUIRED MEMO STRUCTURE ────
+1. **Investment Thesis** (2–3 sentences: what this company is and why it matters)
+2. **Why It Fits Phoenician DNA** (map explicitly to: founder-led, unit economics, underfollowed, margin of safety, scalable)
+3. **Key Strengths** (3–5 bullets, each with [N] citation)
+4. **Key Risks** (3–5 bullets, each with [N] citation)
+5. **Valuation Context** (multiples vs peers, implied upside/downside)
+6. **Diligence Checklist** (5–7 concrete next-step items for the analyst)
+7. **Recommended Action**: Watch / Research Now / Pass
+
+Be direct. No filler. Every claim must cite [N].

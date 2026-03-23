@@ -1,0 +1,144 @@
+services:
+  # ── Streamlit Dashboard ──────────────────────────────────────────────────────
+  - type: web
+    name: screening-engine-dashboard
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: streamlit run src/dashboard/app.py --server.port $PORT --server.address 0.0.0.0
+    plan: starter
+    healthCheckPath: /_stcore/health
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DB_HOST
+        fromDatabase:
+          name: screening-engine-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: screening-engine-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: screening-engine-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: screening-engine-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: screening-engine-db
+          property: password
+      - key: REDIS_HOST
+        fromService:
+          name: screening-engine-redis
+          type: redis
+          property: host
+      - key: REDIS_PORT
+        fromService:
+          name: screening-engine-redis
+          type: redis
+          property: port
+      # ── API Keys (set manually in Render dashboard) ──────────────────────────
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: PERPLEXITY_API_KEY
+        sync: false
+      - key: FMP_API_KEY
+        sync: false
+      - key: GOOGLE_API_KEY
+        sync: false
+      - key: GROK_API_KEY
+        sync: false
+      - key: LANGFUSE_PUBLIC_KEY
+        sync: false
+      - key: LANGFUSE_SECRET_KEY
+        sync: false
+      - key: LANGFUSE_HOST
+        value: https://us.cloud.langfuse.com
+      # ── Model Config ─────────────────────────────────────────────────────────
+      - key: PRIMARY_LLM
+        value: claude-sonnet-4-6
+      - key: MEMO_LLM
+        value: claude-opus-4-6
+      - key: EXTRACTION_LLM
+        value: gpt-4.1-mini
+      - key: PERPLEXITY_MODEL
+        value: sonar-deep-research
+      - key: EMBEDDING_MODEL
+        value: text-embedding-3-small
+      - key: EMBEDDING_DIM
+        value: "1536"
+      # ── Data Sources ─────────────────────────────────────────────────────────
+      - key: SEC_EDGAR_USER_AGENT
+        value: PhoenicianCapital admin@phoenician.capital
+      - key: SEC_RATE_LIMIT_RPS
+        value: "10"
+      # ── Scoring ──────────────────────────────────────────────────────────────
+      - key: MIN_MARKET_CAP
+        value: "250000000"
+      - key: MAX_MARKET_CAP
+        value: "5000000000"
+      - key: HARD_MIN_MARKET_CAP
+        value: "100000000"
+      - key: HARD_MAX_MARKET_CAP
+        value: "10000000000"
+      - key: VECTOR_BACKEND
+        value: pgvector
+      - key: VECTOR_COLLECTION
+        value: documents
+
+  # ── MCP Server ───────────────────────────────────────────────────────────────
+  - type: web
+    name: screening-engine-mcp
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerCommand: uvicorn src.mcp_server.main:app --host 0.0.0.0 --port $PORT
+    plan: starter
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: screening-engine-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: screening-engine-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: screening-engine-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: screening-engine-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: screening-engine-db
+          property: password
+      - key: REDIS_HOST
+        fromService:
+          name: screening-engine-redis
+          type: redis
+          property: host
+      - key: ANTHROPIC_API_KEY
+        sync: false
+
+  # ── Redis ─────────────────────────────────────────────────────────────────────
+  - type: redis
+    name: screening-engine-redis
+    plan: starter
+    maxmemoryPolicy: noeviction
+
+databases:
+  # ── PostgreSQL ────────────────────────────────────────────────────────────────
+  - name: screening-engine-db
+    plan: starter
+    databaseName: phoenician
+    user: phoenician
+    postgresMajorVersion: "16"

@@ -1,0 +1,39 @@
+Classify the following SEC 8-K filing for {{ ticker }}.
+
+Identify the primary signal type from this list:
+- buyback_authorization: Company announces share repurchase program
+- ceo_change: CEO, President, or C-suite departure or appointment
+- earnings_release: Quarterly or annual earnings results
+- ma_announcement: Merger, acquisition, or divestiture announcement
+- debt_issuance: New debt facility, bond issuance, or credit agreement
+- restatement: Financial restatement or accounting correction
+- material_contract: Significant new customer, supplier, or partnership contract
+- other: None of the above
+
+For sentiment, assess whether the event is:
+- positive: Clearly good for shareholders (buyback, strong earnings, major contract win)
+- negative: Clearly bad for shareholders (restatement, CEO fired, debt increase)
+- neutral: Informational or ambiguous
+
+Rate relevance_score from 0.0 to 1.0:
+- 1.0: Immediately actionable for a fundamental investor (CEO change, buyback, restatement)
+- 0.7–0.9: Important context (earnings beat, major contract)
+- 0.4–0.6: Moderate relevance (routine debt facility, minor management change)
+- 0.0–0.3: Low relevance (routine compliance filing, minor update)
+
+Set trigger_rescore to true if the event warrants re-running the scoring model for this company.
+Trigger on: ceo_change, buyback_authorization, restatement, ma_announcement.
+
+8-K Filing Text ({{ ticker }}):
+---
+{{ filing_text }}
+---
+
+Respond ONLY with valid JSON in this exact format:
+{
+  "signal_type": "<one of the types above>",
+  "sentiment": "<positive|negative|neutral>",
+  "relevance_score": <float 0.0-1.0>,
+  "summary": "<one sentence describing the key event>",
+  "trigger_rescore": <true|false>
+}

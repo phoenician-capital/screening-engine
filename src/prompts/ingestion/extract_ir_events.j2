@@ -1,0 +1,29 @@
+Extract all investor relations events and documents from the following HTML content from the IR page of {{ ticker }} ({{ company_name }}).
+
+Look for:
+- Upcoming earnings dates / results announcements
+- Annual General Meetings (AGMs)
+- Investor presentations or roadshows
+- Annual reports, interim reports, half-year results
+- Press releases about financial results
+- Webcasts or conference calls
+
+URL: {{ page_url }}
+
+HTML Content (may be in any language):
+---
+{{ html_content }}
+---
+
+For each event or document found, output a JSON object. Return ONLY a JSON array. If nothing is found, return an empty array [].
+
+Each item should have:
+{
+  "event_type": "<earnings_date|agm|presentation|annual_report|interim_report|press_release|webcast|other>",
+  "title": "<title of the event or document in English (translate if needed)>",
+  "url": "<direct URL if available, null if not>",
+  "event_date": "<ISO date YYYY-MM-DD if identifiable, null if not>",
+  "raw_snippet": "<brief excerpt or description, max 200 chars>"
+}
+
+Return ONLY the JSON array, no other text.
