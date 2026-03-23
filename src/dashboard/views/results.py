@@ -18,13 +18,13 @@ def _run(coro, timeout: int = 120):
         finally:
             loop.close()
     ex = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="dashboard")
-        future = ex.submit(_target)
-        try:
-            return future.result(timeout=timeout)
-        except concurrent.futures.TimeoutError:
-            raise RuntimeError(f"Operation timed out after {timeout}s")
-        except Exception:
-            raise
+    future = ex.submit(_target)
+    try:
+        return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        raise RuntimeError(f"Operation timed out after {timeout}s")
+    except Exception:
+        raise
 import streamlit as st
 
 
