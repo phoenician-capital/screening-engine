@@ -4,9 +4,8 @@ services:
     name: screening-engine-dashboard
     runtime: docker
     dockerfilePath: ./Dockerfile
-    dockerCommand: bash -c "python scripts/migrate.py; streamlit run src/dashboard/app.py --server.port $PORT --server.address 0.0.0.0"
+    dockerCommand: bash scripts/start_dashboard.sh
     plan: starter
-    healthCheckPath: /_stcore/health
     envVars:
       - key: APP_ENV
         value: production
@@ -92,7 +91,7 @@ services:
     name: screening-engine-mcp
     runtime: docker
     dockerfilePath: ./Dockerfile
-    dockerCommand: bash -c "uvicorn src.mcp_server.main:app --host 0.0.0.0 --port $PORT"
+    dockerCommand: bash scripts/start_mcp.sh
     plan: starter
     envVars:
       - key: DB_HOST
