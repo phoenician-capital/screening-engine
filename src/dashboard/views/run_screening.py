@@ -22,10 +22,10 @@ def _run(coro, timeout: int = 1800):
     done_event    = threading.Event()
 
     def _target():
-        # Dedicated executor — stays alive for the entire run
-        # Prevents "cannot schedule new futures after shutdown" from httpx/anyio
+        # Dedicated executor lives for the ENTIRE run including DB writes after LLM calls
+        # Must not be shut down until after loop.close()
         executor = concurrent.futures.ThreadPoolExecutor(
-            max_workers=8, thread_name_prefix="screening_io"
+            max_workers=16, thread_name_prefix="screening_io"
         )
         loop = asyncio.new_event_loop()
         loop.set_default_executor(executor)
@@ -41,9 +41,10 @@ def _run(coro, timeout: int = 1800):
                     task.cancel()
                 if pending:
                     loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-            finally:
                 loop.close()
-                executor.shutdown(wait=False)
+            finally:
+                # Shut down executor only after loop is fully closed
+                executor.shutdown(wait=True, cancel_futures=True)
             done_event.set()
 
     t = threading.Thread(target=_target, daemon=True)
