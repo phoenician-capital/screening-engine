@@ -26,14 +26,16 @@ class DatabaseSettings:
 
     @property
     def dsn(self) -> str:
-        base = f"postgresql+asyncpg://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
+        from urllib.parse import quote_plus
+        base = f"postgresql+asyncpg://{quote_plus(self.user)}:{quote_plus(self.password)}@{self.host}:{self.port}/{self.name}"
         if self.ssl:
             base += f"?ssl={self.ssl}"
         return base
 
     @property
     def sync_dsn(self) -> str:
-        base = f"postgresql://{self.user}:{self.password}@{self.host}:{self.port}/{self.name}"
+        from urllib.parse import quote_plus
+        base = f"postgresql://{quote_plus(self.user)}:{quote_plus(self.password)}@{self.host}:{self.port}/{self.name}"
         if self.ssl:
             base += f"?sslmode={self.ssl}"
         return base
