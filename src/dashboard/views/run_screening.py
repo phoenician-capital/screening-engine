@@ -58,14 +58,14 @@ def _run(coro, timeout: int = 1800):
 
 
 def _engine_factory():
+    from sqlalchemy.pool import NullPool
+    # NullPool: never hold idle connections — opens fresh connection per operation
+    # This avoids the "executor shutdown" error when connections go idle during
+    # the long screen_universe_global fetch (10+ minutes)
     engine = create_async_engine(
         settings.db.dsn,
         echo=False,
-        pool_size=2,
-        max_overflow=2,
-        pool_timeout=30,
-        pool_recycle=300,      # recycle connections every 5 min
-        pool_pre_ping=True,    # test connection before use
+        poolclass=NullPool,
     )
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     return engine, factory
