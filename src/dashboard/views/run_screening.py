@@ -196,72 +196,113 @@ def render() -> None:
 
     mode, theme, sim_ticker = "screener", "", ""
 
-    # ── Workflow ───────────────────────────────────────────────────────────────
+    # ── Background job state ───────────────────────────────────────────────────
+    job = st.session_state.get("screening_job")
+
+    # ── Start new job ──────────────────────────────────────────────────────────
     if run_clicked:
         st.session_state.pop("run_results", None)
         st.session_state.pop("run_error",   None)
 
-        steps_ph  = st.empty()
-        result_ph = st.empty()
+        import threading
 
-        def render_steps(s1, s2, s3, s4, d1="", d2="", d3="", d4=""):
-            steps_ph.markdown(
+        job_state = {
+            "step": 1, "done": False, "error": None,
+            "tickers": [], "scored": 0, "top_n": [],
+            "d1": "", "d2": "", "d3": "", "d4": "",
+            "t0": time.time(),
+        }
+
+        def _bg_run():
+            try:
+                t0 = job_state["t0"]
+                job_state["step"] = 1
+                tickers = _run(_discover_and_ingest(max_co, mode, theme, sim_ticker))
+                job_state["tickers"] = tickers
+                job_state["d1"] = f"Found {len(tickers)} candidates in {time.time()-t0:.0f}s"
+                job_state["d2"] = "Financials from SEC EDGAR XBRL"
+                job_state["step"] = 2
+
+                t2 = time.time()
+                job_state["step"] = 3
+                scored = _run(_score(tickers if tickers else None))
+                job_state["scored"] = len(scored) if isinstance(scored, list) else 0
+                job_state["d3"] = f"{job_state['scored']} companies scored in {time.time()-t2:.1f}s"
+
+                t3 = time.time()
+                job_state["step"] = 4
+                top_n = _run(_get_top_n())
+                job_state["top_n"] = top_n
+                job_state["d4"] = f"Top {len(top_n)} saved in {time.time()-t3:.1f}s"
+
+                import datetime as _dt
+                st.session_state.run_results      = top_n
+                st.session_state.run_completed_at = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+                job_state["done"] = True
+            except Exception as err:
+                job_state["error"] = str(err)
+                job_state["done"]  = True
+
+        t = threading.Thread(target=_bg_run, daemon=False)  # non-daemon: survives rerender
+        t.start()
+        job_state["thread"] = t
+        st.session_state["screening_job"] = job_state
+        st.rerun()
+
+    # ── Poll running job ───────────────────────────────────────────────────────
+    job = st.session_state.get("screening_job")
+    if job and not job.get("done"):
+        step  = job.get("step", 1)
+        s1    = "done" if step > 1 else "running"
+        s2    = "done" if step > 2 else ("running" if step == 2 else "waiting")
+        s3    = "done" if step > 3 else ("running" if step == 3 else "waiting")
+        s4    = "done" if step > 4 else ("running" if step == 4 else "waiting")
+        elapsed = int(time.time() - job.get("t0", time.time()))
+
+        st.markdown(
+            _card(
+                "<div style='font-size:0.7rem;font-weight:600;text-transform:uppercase;"
+                "letter-spacing:0.09em;color:#9ca3af;margin-bottom:4px'>PROGRESS</div>"
+                + _step_row("1", "Discover companies",          s1, job.get("d1") or "Scanning EDGAR universe...")
+                + _step_row("2", "Ingest data (filings, news)", s2, job.get("d2") or ("Fetching financials..." if step >= 2 else ""))
+                + _step_row("3", "Score and rank",               s3, job.get("d3") or ("Scoring..." if step >= 3 else ""))
+                + _step_row("4", "Save top results to database", s4, job.get("d4") or ("Saving..." if step >= 4 else ""))
+            ),
+            unsafe_allow_html=True,
+        )
+        st.caption(f"Running... {elapsed}s elapsed")
+        time.sleep(5)
+        st.rerun()
+        return
+
+    # ── Show completed job ─────────────────────────────────────────────────────
+    if job and job.get("done"):
+        if job.get("error"):
+            st.error(f"Screening failed: {job['error']}")
+        else:
+            top_n = job.get("top_n", [])
+            total = int(time.time() - job.get("t0", time.time()))
+            st.markdown(
+                f'<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;'
+                f'padding:16px 24px;margin-bottom:16px;display:flex;align-items:center;gap:16px">'
+                f'<div style="font-size:0.85rem;color:#065f46;font-weight:500">'
+                f'Complete — {len(job.get("tickers",[]))} screened, top {len(top_n)} saved.'
+                f'</div><div style="margin-left:auto;font-size:0.78rem;color:#6b7280">'
+                f'{total}s total</div></div>',
+                unsafe_allow_html=True,
+            )
+            st.markdown(
                 _card(
                     "<div style='font-size:0.7rem;font-weight:600;text-transform:uppercase;"
-                    "letter-spacing:0.09em;color:#9ca3af;margin-bottom:4px'>Progress</div>"
-                    + _step_row("1", "Discover companies",          s1, d1)
-                    + _step_row("2", "Ingest data (filings, news)", s2, d2)
-                    + _step_row("3", "Score and rank",               s3, d3)
-                    + _step_row("4", f"Save top results to database",s4, d4)
+                    "letter-spacing:0.09em;color:#9ca3af;margin-bottom:4px'>PROGRESS</div>"
+                    + _step_row("1", "Discover companies",          "done", job.get("d1",""))
+                    + _step_row("2", "Ingest data (filings, news)", "done", job.get("d2",""))
+                    + _step_row("3", "Score and rank",               "done", job.get("d3",""))
+                    + _step_row("4", "Save top results to database", "done", job.get("d4",""))
                 ),
                 unsafe_allow_html=True,
             )
-
-        tickers: list[str] = []
-        render_steps("running", "waiting", "waiting", "waiting",
-                     d1="Scanning EDGAR universe for candidates...")
-
-        try:
-            t0 = time.time()
-            render_steps("running", "running", "waiting", "waiting",
-                         d1="Scanning EDGAR universe for candidates...")
-
-            tickers = _run(_discover_and_ingest(max_co, mode, theme, sim_ticker))
-            elapsed = time.time() - t0
-            d1 = f"Found {len(tickers)} candidates in {elapsed:.0f}s"
-            d2 = "Financials from SEC EDGAR XBRL"
-            render_steps("done", "done", "running", "waiting", d1=d1, d2=d2)
-
-            t2 = time.time()
-            scored = _run(_score(tickers if tickers else None))
-            n_scored = len(scored) if isinstance(scored, list) else 0
-            d3 = f"{n_scored} companies scored in {time.time()-t2:.1f}s"
-            render_steps("done", "done", "done", "running", d1=d1, d2=d2, d3=d3)
-
-            t3 = time.time()
-            top_n = _run(_get_top_n())
-            d4 = f"Top {len(top_n)} saved in {time.time()-t3:.1f}s"
-            render_steps("done", "done", "done", "done", d1=d1, d2=d2, d3=d3, d4=d4)
-
-            import datetime as _dt
-            st.session_state.run_results      = top_n
-            st.session_state.run_completed_at = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-            total_time = time.time() - t0
-
-            result_ph.markdown(
-                f'<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;'
-                f'padding:16px 24px;margin-top:16px;display:flex;align-items:center;gap:16px">'
-                f'<div style="font-size:0.85rem;color:#065f46;font-weight:500">'
-                f'Complete — {len(tickers)} screened, top {len(top_n)} saved.'
-                f'</div>'
-                f'<div style="margin-left:auto;font-size:0.78rem;color:#6b7280">'
-                f'{total_time:.0f}s total</div></div>',
-                unsafe_allow_html=True,
-            )
-
-        except Exception as err:
-            st.session_state.run_error = str(err)
-            result_ph.error(str(err))
+        st.session_state.pop("screening_job", None)
 
     # ── Show results ──────────────────────────────────────────────────────────
     if st.session_state.get("run_results") and not run_clicked:
