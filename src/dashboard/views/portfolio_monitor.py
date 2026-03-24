@@ -22,8 +22,8 @@ def _run(coro, timeout: int = 120):
             return loop.run_until_complete(coro)
         finally:
             loop.close()
-    ex = concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="dashboard")
-    return ex.submit(_target).result(timeout=timeout)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2, thread_name_prefix="dashboard") as ex:
+        return ex.submit(_target).result(timeout=timeout)
 
 
 def _engine():

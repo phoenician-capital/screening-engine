@@ -22,8 +22,13 @@ def _run(coro, timeout: int = 1800):
     done_event    = threading.Event()
 
     def _target():
-        # Completely fresh event loop — no shared state with Streamlit
+        # Dedicated executor — stays alive for the entire run
+        # Prevents "cannot schedule new futures after shutdown" from httpx/anyio
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=8, thread_name_prefix="screening_io"
+        )
         loop = asyncio.new_event_loop()
+        loop.set_default_executor(executor)
         asyncio.set_event_loop(loop)
         try:
             result_holder[0] = loop.run_until_complete(coro)
@@ -31,7 +36,6 @@ def _run(coro, timeout: int = 1800):
             error_holder[0] = e
         finally:
             try:
-                # Cancel all pending tasks cleanly
                 pending = asyncio.all_tasks(loop)
                 for task in pending:
                     task.cancel()
@@ -39,6 +43,7 @@ def _run(coro, timeout: int = 1800):
                     loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
             finally:
                 loop.close()
+                executor.shutdown(wait=False)
             done_event.set()
 
     t = threading.Thread(target=_target, daemon=True)
