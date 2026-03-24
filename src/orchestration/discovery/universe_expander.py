@@ -67,31 +67,96 @@ class UniverseExpander:
             include_intl=False,  # disabled until executor issue resolved on Render
         )
 
-        # Store results using the existing session (already bound to this event loop)
+        # Use psycopg2 (sync) for DB writes — avoids asyncpg event loop issues
+        # after the long-running screen_universe_global call
+        from src.config.settings import settings
+        import psycopg2, psycopg2.extras, json
+
         tickers_added: list[str] = []
-        for r in results:
-            ticker = r.get("company", {}).get("ticker", "?")
-            try:
-                co_info = r["company"]
-                metrics = r["metrics"]
+        try:
+            conn = psycopg2.connect(
+                host=settings.db.host, port=settings.db.port,
+                dbname=settings.db.name, user=settings.db.user,
+                password=settings.db.password,
+                sslmode="require" if settings.db.ssl else "prefer",
+                connect_timeout=15,
+            )
+            conn.autocommit = False
+            cur = conn.cursor()
 
-                await self.company_repo.upsert(co_info)
-                await self.session.flush()
-                metric = Metric(
-                    ticker      = ticker,
-                    period_end  = dt.date.today(),
-                    period_type = "snapshot",
-                    **{k: v for k, v in metrics.items() if k != "ticker"},
-                )
-                self.session.add(metric)
-                await self.session.commit()
-                tickers_added.append(ticker)
-                logger.info("Stored %s", ticker)
+            for r in results:
+                ticker = r.get("company", {}).get("ticker", "?")
+                try:
+                    co = r["company"]
+                    m  = r["metrics"]
 
-            except Exception as e:
-                import traceback
-                logger.error("Failed to store %s: %s\n%s", ticker, e, traceback.format_exc())
-                await self.session.rollback()
+                    # Upsert company
+                    cur.execute("""
+                        INSERT INTO companies
+                            (ticker, name, exchange, country, gics_sector, gics_industry_group,
+                             gics_industry, gics_sub_industry, market_cap_usd, description,
+                             website, cik, is_founder_led, founder_name, is_active)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (ticker) DO UPDATE SET
+                            name=EXCLUDED.name, market_cap_usd=EXCLUDED.market_cap_usd,
+                            gics_sector=EXCLUDED.gics_sector, is_active=TRUE,
+                            updated_at=NOW()
+                    """, (
+                        co.get("ticker"), co.get("name","")[:255], co.get("exchange","")[:50],
+                        co.get("country","")[:10], co.get("gics_sector","")[:100],
+                        co.get("gics_industry_group","")[:100], co.get("gics_industry","")[:100],
+                        co.get("gics_sub_industry","")[:100],
+                        float(co["market_cap_usd"]) if co.get("market_cap_usd") else None,
+                        co.get("description","")[:2000], co.get("website","")[:255],
+                        co.get("cik"), co.get("is_founder_led"), co.get("founder_name"),
+                        True,
+                    ))
+
+                    # Upsert metrics
+                    def _f(v):
+                        return float(v) if v is not None else None
+
+                    cur.execute("""
+                        INSERT INTO metrics
+                            (ticker, period_end, period_type, revenue, gross_margin, ebit,
+                             ebit_margin, net_income, fcf, roic, fcf_yield, revenue_growth_yoy,
+                             net_debt_ebitda, total_assets, market_cap_usd, ev_ebit,
+                             avg_daily_volume, analyst_count, insider_ownership_pct)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                        ON CONFLICT (ticker, period_end, period_type) DO UPDATE SET
+                            revenue=EXCLUDED.revenue, gross_margin=EXCLUDED.gross_margin,
+                            ebit=EXCLUDED.ebit, net_income=EXCLUDED.net_income,
+                            fcf=EXCLUDED.fcf, roic=EXCLUDED.roic,
+                            fcf_yield=EXCLUDED.fcf_yield,
+                            revenue_growth_yoy=EXCLUDED.revenue_growth_yoy,
+                            net_debt_ebitda=EXCLUDED.net_debt_ebitda,
+                            total_assets=EXCLUDED.total_assets,
+                            market_cap_usd=EXCLUDED.market_cap_usd
+                    """, (
+                        ticker, dt.date.today(), "snapshot",
+                        _f(m.get("revenue")), _f(m.get("gross_margin")),
+                        _f(m.get("ebit")), _f(m.get("ebit_margin")),
+                        _f(m.get("net_income")), _f(m.get("fcf")),
+                        _f(m.get("roic")), _f(m.get("fcf_yield")),
+                        _f(m.get("revenue_growth_yoy")), _f(m.get("net_debt_ebitda")),
+                        _f(m.get("total_assets")), _f(m.get("market_cap_usd")),
+                        _f(m.get("ev_ebit")), _f(m.get("avg_daily_volume")),
+                        m.get("analyst_count"), _f(m.get("insider_ownership_pct")),
+                    ))
+
+                    conn.commit()
+                    tickers_added.append(ticker)
+                    logger.info("Stored %s", ticker)
+
+                except Exception as e:
+                    conn.rollback()
+                    logger.warning("Failed to store %s: %s", ticker, e)
+
+            cur.close()
+            conn.close()
+
+        except Exception as e:
+            logger.error("DB connection failed: %s", e)
 
         logger.info("Universe build complete: %d companies stored", len(tickers_added))
         return tickers_added
