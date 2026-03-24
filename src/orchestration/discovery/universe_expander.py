@@ -64,6 +64,7 @@ class UniverseExpander:
             max_companies=max_companies,
             concurrency=concurrency,
             exclude_tickers=existing_tickers,
+            include_intl=False,  # disabled until executor issue resolved on Render
         )
 
         from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -101,7 +102,8 @@ class UniverseExpander:
                 tickers_added.append(ticker)
 
             except Exception as e:
-                logger.warning("Failed to store %s — rolling back: %s", ticker, e)
+                import traceback
+                logger.error("Failed to store %s: %s\n%s", ticker, e, traceback.format_exc())
 
         await engine.dispose()
         logger.info("Universe build complete: %d companies stored", len(tickers_added))
