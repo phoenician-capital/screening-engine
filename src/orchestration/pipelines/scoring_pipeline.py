@@ -4,9 +4,12 @@ Full scoring pipeline — ingestion → hard filter → score → rank → persi
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from typing import Any
+
+from src.config.settings import settings
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -94,144 +97,139 @@ class ScoringPipeline:
 
         results: list[ScoringResult] = []
         passed_filter = 0
+        sem = asyncio.Semaphore(10)  # score up to 10 companies concurrently
 
-        for company in companies:
-            # 3. Get latest metrics
-            metrics = await self.metric_repo.get_latest(company.ticker)
-            if not metrics:
-                logger.warning("No metrics for %s, skipping", company.ticker)
-                continue
+        async def _score_one(company) -> None:
+            async with sem:
+                # 3. Get latest metrics
+                metrics = await self.metric_repo.get_latest(company.ticker)
+                if not metrics:
+                    logger.warning("No metrics for %s, skipping", company.ticker)
+                    return
 
-            # 3b. Skip companies with no usable financial data
-            has_data = any([
-                metrics.revenue is not None,
-                metrics.ebit is not None,
-                metrics.net_income is not None,
-                metrics.total_assets is not None,
-            ])
-            if not has_data:
-                logger.debug("Skipping %s — no financial data", company.ticker)
-                continue
+                # 3b. Skip companies with no usable financial data
+                has_data = any([
+                    metrics.revenue is not None,
+                    metrics.ebit is not None,
+                    metrics.net_income is not None,
+                    metrics.total_assets is not None,
+                ])
+                if not has_data:
+                    logger.debug("Skipping %s — no financial data", company.ticker)
+                    return
 
-            # 4. Hard filter — full Round 1 criteria
-            filter_result = self.hard_filter.check(
-                gics_sector=company.gics_sector,
-                gics_sub_industry=company.gics_sub_industry,
-                market_cap=float(metrics.market_cap_usd) if metrics.market_cap_usd else None,
-                net_debt_ebitda=float(metrics.net_debt_ebitda) if metrics.net_debt_ebitda else None,
-                gross_margin=float(metrics.gross_margin) if metrics.gross_margin else None,
-                country=company.country,
-                avg_daily_volume=float(metrics.avg_daily_volume) if metrics.avg_daily_volume else None,
-                net_income=float(metrics.net_income) if metrics.net_income else None,
-                company_name=company.name,
-            )
-
-            if not filter_result.passed:
-                results.append(ScoringResult(
-                    ticker=company.ticker,
-                    fit_score=0,
-                    risk_score=100,
-                    rank_score=-100,
-                    disqualified=True,
-                    disqualify_reason=filter_result.reason,
-                ))
-                continue
-
-            passed_filter += 1
-
-            # 5. Get sector medians for valuation comparison
-            sector_medians = {}
-            if company.gics_sector:
-                sector_medians = await self.metric_repo.get_sector_medians(
-                    company.gics_sector
+                # 4. Hard filter
+                filter_result = self.hard_filter.check(
+                    gics_sector=company.gics_sector,
+                    gics_sub_industry=company.gics_sub_industry,
+                    market_cap=float(metrics.market_cap_usd) if metrics.market_cap_usd else None,
+                    net_debt_ebitda=float(metrics.net_debt_ebitda) if metrics.net_debt_ebitda else None,
+                    gross_margin=float(metrics.gross_margin) if metrics.gross_margin else None,
+                    country=company.country,
+                    avg_daily_volume=float(metrics.avg_daily_volume) if metrics.avg_daily_volume else None,
+                    net_income=float(metrics.net_income) if metrics.net_income else None,
+                    company_name=company.name,
                 )
 
-            # 6. Load insider cluster data and transcript signals
-            cluster_purchases = list(
-                await self.insider_repo.get_cluster_purchases_for_ticker(company.ticker, days=30)
-            )
-            transcript_doc = await self.doc_repo.get_latest_by_type(company.ticker, "transcript_analysis")
-            transcript_signals = (
-                transcript_doc.meta.get("signals") if transcript_doc and transcript_doc.meta else None
-            )
+                if not filter_result.passed:
+                    results.append(ScoringResult(
+                        ticker=company.ticker,
+                        fit_score=0,
+                        risk_score=100,
+                        rank_score=-100,
+                        disqualified=True,
+                        disqualify_reason=filter_result.reason,
+                    ))
+                    return
 
-            # 7. Fit score
-            fit_score, fit_criteria = self.fit_scorer.score(
-                company=company,
-                metrics=metrics,
-                sector_medians=sector_medians,
-                claims=None,
-                cluster_purchases=cluster_purchases,
-                current_price=float(metrics.market_cap_usd / metrics.shares_outstanding)
-                    if metrics.market_cap_usd and metrics.shares_outstanding and metrics.shares_outstanding > 0
-                    else None,
-                transcript_signals=transcript_signals,
-            )
+                nonlocal passed_filter
+                passed_filter += 1
 
-            # 7. Risk score
-            risk_score, risk_criteria = self.risk_scorer.score(
-                metrics=metrics,
-                claims=None,
-                country=company.country,
-            )
+                # 5. Sector medians
+                sector_medians = {}
+                if company.gics_sector:
+                    sector_medians = await self.metric_repo.get_sector_medians(company.gics_sector)
 
-            # 8. Feedback adjustment
-            feedback_stats = await self.feedback_repo.count_by_action(company.ticker)
-            rank_score = self.ranker.compute_rank_score(
-                fit_score, risk_score, feedback_stats
-            )
+                # 6. Insider + transcript signals
+                cluster_purchases = list(
+                    await self.insider_repo.get_cluster_purchases_for_ticker(company.ticker, days=30)
+                )
+                transcript_doc = await self.doc_repo.get_latest_by_type(company.ticker, "transcript_analysis")
+                transcript_signals = (
+                    transcript_doc.meta.get("signals") if transcript_doc and transcript_doc.meta else None
+                )
 
-            all_criteria = [c.model_dump() for c in fit_criteria + risk_criteria]
+                # 7. Fit score
+                fit_score, fit_criteria = self.fit_scorer.score(
+                    company=company,
+                    metrics=metrics,
+                    sector_medians=sector_medians,
+                    claims=None,
+                    cluster_purchases=cluster_purchases,
+                    current_price=float(metrics.market_cap_usd / metrics.shares_outstanding)
+                        if metrics.market_cap_usd and metrics.shares_outstanding and metrics.shares_outstanding > 0
+                        else None,
+                    transcript_signals=transcript_signals,
+                )
 
-            # 9. Generate investment memo with portfolio comparison
-            memo_text, portfolio_comparison = generate_memo(
-                company=company,
-                metrics=metrics,
-                fit_score=fit_score,
-                risk_score=risk_score,
-                fit_criteria=fit_criteria,
-                risk_criteria=risk_criteria,
-                portfolio_avg=portfolio_avg,
-            )
+                # 8. Risk score
+                risk_score, risk_criteria = self.risk_scorer.score(
+                    metrics=metrics, claims=None, country=company.country,
+                )
 
-            # 9b. Final gate — skip if fit score below minimum threshold
-            if not self.hard_filter.passes_min_score(fit_score):
-                logger.debug("Skipping %s — fit score %.1f below minimum", company.ticker, fit_score)
-                continue
+                # 9. Rank score
+                feedback_stats = await self.feedback_repo.count_by_action(company.ticker)
+                rank_score = self.ranker.compute_rank_score(fit_score, risk_score, feedback_stats)
 
-            results.append(ScoringResult(
-                ticker=company.ticker,
-                fit_score=fit_score,
-                risk_score=risk_score,
-                rank_score=rank_score,
-                criteria=fit_criteria + risk_criteria,
-            ))
+                all_criteria = [c.model_dump() for c in fit_criteria + risk_criteria]
 
-            # 10. Check if this ticker was seeded by portfolio similarity (Redis)
-            inspired_by = None
-            try:
-                import redis as _redis
-                from src.config.settings import settings as _settings
-                r = _redis.Redis.from_url(_settings.redis.url, decode_responses=True, socket_timeout=1)
-                inspired_by = r.get(f"portfolio_similarity:{company.ticker}")
-            except Exception:
-                pass
+                # 10. Memo
+                memo_text, portfolio_comparison = generate_memo(
+                    company=company, metrics=metrics,
+                    fit_score=fit_score, risk_score=risk_score,
+                    fit_criteria=fit_criteria, risk_criteria=risk_criteria,
+                    portfolio_avg=portfolio_avg,
+                )
 
-            # 11. Persist recommendation
-            rec = Recommendation(
-                ticker=company.ticker,
-                scoring_run_id=scoring_run.id,
-                fit_score=fit_score,
-                risk_score=risk_score,
-                rank_score=rank_score,
-                memo_text=memo_text,
-                portfolio_comparison=portfolio_comparison,
-                scoring_detail={"criteria": all_criteria},
-                inspired_by=inspired_by,
-            )
-            self.session.add(rec)
+                # 11. Final gate
+                if not self.hard_filter.passes_min_score(fit_score):
+                    logger.debug("Skipping %s — fit score %.1f below minimum", company.ticker, fit_score)
+                    return
 
-        # 10. Rank and apply top-N limit from config
+                results.append(ScoringResult(
+                    ticker=company.ticker,
+                    fit_score=fit_score,
+                    risk_score=risk_score,
+                    rank_score=rank_score,
+                    criteria=fit_criteria + risk_criteria,
+                ))
+
+                # 12. Portfolio similarity badge
+                inspired_by = None
+                try:
+                    import redis as _redis
+                    r = _redis.Redis.from_url(settings.redis.url, decode_responses=True, socket_timeout=1)
+                    inspired_by = r.get(f"portfolio_similarity:{company.ticker}")
+                except Exception:
+                    pass
+
+                # 13. Persist recommendation
+                rec = Recommendation(
+                    ticker=company.ticker,
+                    scoring_run_id=scoring_run.id,
+                    fit_score=fit_score,
+                    risk_score=risk_score,
+                    rank_score=rank_score,
+                    memo_text=memo_text,
+                    portfolio_comparison=portfolio_comparison,
+                    scoring_detail={"criteria": all_criteria},
+                    inspired_by=inspired_by,
+                )
+                self.session.add(rec)
+
+        await asyncio.gather(*[_score_one(c) for c in companies], return_exceptions=True)
+
+        # Rank and apply top-N limit from config
         from src.config.scoring_weights import load_scoring_weights as _lsw
         top_n = int(_lsw().get("ranking", {}).get("top_n_results", 5))
         ranked = self.ranker.rank(results)[:top_n]

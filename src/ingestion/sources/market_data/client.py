@@ -29,6 +29,49 @@ import httpx
 
 from src.config.settings import settings
 
+# ── Redis cache helper ─────────────────────────────────────────────────────────
+def _get_redis():
+    """Get Redis client, returns None if unavailable."""
+    try:
+        import redis as _redis
+        r = _redis.Redis(
+            host=settings.redis.host,
+            port=settings.redis.port,
+            db=settings.redis.db,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+        r.ping()
+        return r
+    except Exception:
+        return None
+
+_redis_client = None
+
+def _redis():
+    global _redis_client
+    if _redis_client is None:
+        _redis_client = _get_redis()
+    return _redis_client
+
+def _cache_get(key: str) -> dict | None:
+    try:
+        r = _redis()
+        if not r:
+            return None
+        val = r.get(key)
+        return json.loads(val) if val else None
+    except Exception:
+        return None
+
+def _cache_set(key: str, value: dict, ttl: int = 86400) -> None:
+    try:
+        r = _redis()
+        if r:
+            r.setex(key, ttl, json.dumps(value, default=str))
+    except Exception:
+        pass
+
 logger = logging.getLogger(__name__)
 
 _UA   = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0 Safari/537.36"
@@ -246,6 +289,13 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
     Returns a dict compatible with _compute_metrics() or None if unavailable.
     Covers both US and international tickers.
     """
+    # Check cache first (24h TTL)
+    cache_key = f"fmp:fin:{ticker}"
+    cached = _cache_get(cache_key)
+    if cached:
+        logger.debug("FMP cache hit for %s", ticker)
+        return cached
+
     key = settings.ingestion.fmp_api_key
     if not key:
         return None
@@ -342,7 +392,7 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
                 ((gross_profit / revenue * 100) if gross_profit and revenue else 0),
                 (roic or 0) * 100)
 
-    return {
+    result = {
         "sector":       sector,
         "country":      country,
         "website":      website,
@@ -369,6 +419,8 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
         "capex_rev_direct":       capex_rev,
         "market_cap_fmp":         market_cap,
     }
+    _cache_set(f"fmp:fin:{ticker}", result, ttl=86400)  # cache 24h
+    return result
 
 
 async def _fetch_llm_financials(ticker: str, company_name: str, country: str) -> dict[str, Any]:
@@ -581,10 +633,14 @@ async def _get_us_candidates(client: httpx.AsyncClient,
     """Get US companies in market cap range from NASDAQ Trader API.
     Returns [{"ticker", "name", "market_cap", "cik"}]
     """
-    # EDGAR ticker-to-CIK map
-    edgar_data = await _get(
-        client, "https://www.sec.gov/files/company_tickers_exchange.json",
-        headers={"User-Agent": _EDGAR_UA, "Accept": "application/json"})
+    # EDGAR ticker-to-CIK map — cache for 24h
+    edgar_data = _cache_get("edgar:company_tickers_exchange")
+    if not edgar_data:
+        edgar_data = await _get(
+            client, "https://www.sec.gov/files/company_tickers_exchange.json",
+            headers={"User-Agent": _EDGAR_UA, "Accept": "application/json"})
+        if edgar_data:
+            _cache_set("edgar:company_tickers_exchange", edgar_data, ttl=86400)
     cik_map: dict[str, str] = {}
     name_map: dict[str, str] = {}
     if edgar_data:
@@ -868,8 +924,8 @@ async def screen_universe_global(
             # - price_sem: 10 concurrent Yahoo v8 price calls (fast, no rate limit)
             # - edgar_sem: 3 concurrent EDGAR XBRL calls (respect 10 req/sec limit;
             #              each call makes 2 requests so 3 concurrent = 6 req/sec)
-            price_sem = asyncio.Semaphore(10)
-            edgar_sem = asyncio.Semaphore(3)
+            price_sem = asyncio.Semaphore(15)
+            edgar_sem = asyncio.Semaphore(5)
 
             async def _process_us(co: dict):
                 if stop_event.is_set():
@@ -964,8 +1020,8 @@ async def screen_universe_global(
             print(f"Processing {len(intl_candidates)} intl candidates...", flush=True)
 
             # Run financial lookups: FMP first, LLM fallback
-            fmp_sem = asyncio.Semaphore(5)
-            llm_sem = asyncio.Semaphore(3)
+            fmp_sem = asyncio.Semaphore(15)
+            llm_sem = asyncio.Semaphore(8)
 
             async def _process_intl(co: dict) -> dict | None:
                 ticker  = co["ticker"]
