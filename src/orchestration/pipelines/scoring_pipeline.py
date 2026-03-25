@@ -72,12 +72,9 @@ class ScoringPipeline:
         self.session.add(scoring_run)
         await self.session.flush()
 
-        # For manual runs: clear previous recommendations so Results shows only fresh results.
-        # Scheduled runs (daily/weekly) preserve history for trend tracking.
-        if run_type == "manual":
-            await self.session.execute(delete(Recommendation))
-            await self.session.flush()
-            logger.info("Manual run — cleared previous recommendations")
+        # Never clear recommendations — accumulate across runs and re-rank all.
+        # Each run adds new companies, then all are re-ranked together.
+        logger.info("Accumulating results — existing recommendations preserved")
 
         # 2. Get universe
         if tickers:
@@ -229,23 +226,29 @@ class ScoringPipeline:
 
         await asyncio.gather(*[_score_one(c) for c in companies], return_exceptions=True)
 
-        # Rank and apply top-N limit from config
-        from src.config.scoring_weights import load_scoring_weights as _lsw
-        from sqlalchemy import update as _update
-        top_n = int(_lsw().get("ranking", {}).get("top_n_results", 5))
-        ranked = self.ranker.rank(results)[:top_n]
-
-        # Flush pending recs to DB first, then update rank by ticker
+        # Flush new recs to DB first
         await self.session.flush()
-        for i, r in enumerate(ranked, 1):
-            await self.session.execute(
-                _update(Recommendation)
-                .where(
-                    Recommendation.scoring_run_id == scoring_run.id,
-                    Recommendation.ticker == r.ticker,
-                )
-                .values(rank=i)
-            )
+
+        # Re-rank ALL recommendations across all runs by rank_score descending
+        # This ensures every run re-sorts the full accumulated universe
+        from sqlalchemy import update as _update, select as _select
+        from src.config.scoring_weights import load_scoring_weights as _lsw
+
+        all_recs = (await self.session.execute(
+            _select(Recommendation)
+            .where(Recommendation.rank_score.isnot(None))
+            .where(Recommendation.rank_score > -50)
+            .order_by(Recommendation.rank_score.desc())
+        )).scalars().all()
+
+        # Clear all ranks first
+        await self.session.execute(_update(Recommendation).values(rank=None))
+
+        # Assign new ranks across ALL accumulated recommendations
+        for i, rec in enumerate(all_recs, 1):
+            rec.rank = i
+
+        ranked = all_recs  # for logging
 
         # 11. Update scoring run stats
         scoring_run.tickers_scored = len(companies)
