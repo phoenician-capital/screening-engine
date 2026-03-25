@@ -98,7 +98,7 @@ class UniverseExpander:
                 model=settings.llm.primary_model,
                 max_tokens=2000,
                 temperature=0.1,
-                max_searches=0,  # no web search needed — we provide the list
+                max_searches=1,  # minimal — we provide the list, no search needed
             )
             # Parse JSON array from response
             text = response.strip()
