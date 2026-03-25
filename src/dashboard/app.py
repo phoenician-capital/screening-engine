@@ -199,7 +199,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
     # Nav — single radio widget, no gaps
-    pages = ["Run Screening", "Results", "Portfolio Monitor", "Settings"]
+    pages = ["Run Screening", "Results", "Portfolio Monitor", "Filters"]
     selected = st.radio(
         "nav",
         pages,
@@ -231,6 +231,6 @@ elif page == "Results":
 elif page == "Portfolio Monitor":
     from src.dashboard.views.portfolio_monitor import render
     render()
-elif page == "Settings":
+elif page == "Filters":
     from src.dashboard.views.screening_settings import render
     render()
