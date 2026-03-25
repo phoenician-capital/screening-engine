@@ -184,7 +184,7 @@ class ScoringPipeline:
                 all_criteria = [c.model_dump() for c in fit_criteria + risk_criteria]
 
                 # 10. Memo
-                memo_text, portfolio_comparison = generate_memo(
+                memo_text, portfolio_comparison = await generate_memo(
                     company=company, metrics=metrics,
                     fit_score=fit_score, risk_score=risk_score,
                     fit_criteria=fit_criteria, risk_criteria=risk_criteria,

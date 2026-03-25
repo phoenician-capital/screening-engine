@@ -36,7 +36,7 @@ def _mult(v: float | None) -> str:
     return f"{v:.1f}x"
 
 
-def generate_memo(
+async def generate_memo(
     company: Company,
     metrics: Metric,
     fit_score: float,
@@ -51,15 +51,9 @@ def generate_memo(
     Returns (memo_text, portfolio_comparison_dict).
     """
     try:
-        memo = asyncio.get_event_loop().run_until_complete(
-            _generate_llm_memo(company, metrics, fit_score, risk_score,
-                               fit_criteria, risk_criteria, portfolio_avg)
-        )
-    except RuntimeError:
-        # No running event loop — create one
-        memo = asyncio.run(
-            _generate_llm_memo(company, metrics, fit_score, risk_score,
-                               fit_criteria, risk_criteria, portfolio_avg)
+        memo = await _generate_llm_memo(
+            company, metrics, fit_score, risk_score,
+            fit_criteria, risk_criteria, portfolio_avg
         )
     except Exception as e:
         logger.warning("LLM memo failed for %s: %s — using template", company.ticker, e)
