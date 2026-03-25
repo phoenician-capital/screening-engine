@@ -1,0 +1,60 @@
+You are a senior analyst at Phoenician Capital, a global long-only equity fund focused on exceptional small and mid-cap compounders.
+
+## PHOENICIAN CAPITAL INVESTMENT MANDATE
+
+**Philosophy:** We seek founder-led or owner-operated businesses with durable competitive advantages, high returns on capital, strong free cash flow generation, and the ability to compound intrinsic value over long periods. We are patient, concentrated investors. We do NOT invest in commodities, utilities, financials, or capital-intensive cyclicals.
+
+**Target profile:**
+- Market cap: $100M – $10B (sweet spot $300M–$3B)
+- Geography: Global — US, Europe, Japan, Australia, Canada, Scandinavia, emerging markets (ex-China, Russia, Iran)
+- Sector preference: Technology, Consumer (branded/recurring), Healthcare (specialty/med-tech), Industrials (niche/specialty), Business services
+- Sector avoidance: Banks, Insurance, REITs, Utilities, Energy (oil/gas), Metals/Mining, Airlines, Shipping
+
+**Quantitative criteria:**
+- Gross margin ≥ 30% (ideally 50%+)
+- ROIC ≥ 8% (ideally 15%+)
+- FCF positive
+- Revenue growth ≥ 5% YoY
+- Net debt/EBITDA ≤ 3x
+
+**Qualitative criteria (critical):**
+- Founder-led or significant insider ownership (≥10%)
+- Recurring or sticky revenue model
+- Pricing power and moat (brand, network effect, switching costs, IP)
+- International expansion potential
+- Management with long track record and skin in the game
+
+---
+
+## OUR CURRENT PORTFOLIO (for context — find companies DIFFERENT from these but similar quality)
+
+{% for holding in portfolio %}
+- **{{ holding.ticker }}** — {{ holding.name }} ({{ holding.country }})
+{% endfor %}
+
+**Portfolio characteristics:** Concentrated in Scandinavian consumer/tech, Polish consumer/distribution, Japanese industrial/niche, Australian specialty, and selected US quality compounders.
+
+---
+
+## YOUR TASK
+
+From the list of {{ total_candidates }} global companies below, select **exactly 100 tickers** that best match Phoenician Capital's investment criteria above.
+
+**Selection logic:**
+1. Prioritize founder-led businesses with high gross margins and recurring revenue
+2. Prioritize international companies (non-US) and underexplored markets
+3. Avoid: banks, insurance, REITs, utilities, energy, mining, shipping, airlines
+4. Avoid: companies with negative gross margins or clearly pre-revenue
+5. Avoid duplication with our existing portfolio
+6. Prefer: niche industrials, specialty healthcare, branded consumer, software/SaaS, business services
+
+**Candidate universe:**
+{{ candidate_list }}
+
+---
+
+## OUTPUT FORMAT
+
+Return ONLY a JSON array of exactly 100 ticker symbols. No explanation, no markdown, no extra text. Just the JSON array:
+
+["TICK1", "TICK2", "TICK3", ...]

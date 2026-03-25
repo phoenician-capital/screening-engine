@@ -899,9 +899,12 @@ async def screen_universe_global(
     include_intl: bool = True,
     concurrency: int = 10,
     exclude_tickers: set[str] | None = None,
+    preselected_tickers: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Build global investable universe.
+    If preselected_tickers is provided, only fetch financials for those tickers
+    (Claude pre-screening path). Otherwise falls back to full universe scan.
     Returns list of {"company": {...}, "metrics": {...}} dicts.
     """
     results: list[dict] = []
@@ -909,7 +912,87 @@ async def screen_universe_global(
 
     async with httpx.AsyncClient(timeout=20) as client:
 
-        # No hard quota — run both US and international fully, then combine and shuffle
+        # ── Fast path: Claude pre-selected tickers ────────────────────────────
+        if preselected_tickers:
+            logger.info("Fast path: fetching financials for %d pre-selected tickers", len(preselected_tickers))
+            print(f"Fetching financials for {len(preselected_tickers)} Claude-selected candidates...", flush=True)
+
+            # Build a combined candidate map from both US and intl lists
+            us_raw   = await _get_us_candidates(client, min_market_cap, max_market_cap)
+            intl_raw = await _get_intl_candidates(client, min_market_cap, max_market_cap)
+            all_map  = {c["ticker"]: {**c, "is_intl": False} for c in us_raw}
+            all_map.update({c["ticker"]: {**c, "is_intl": True} for c in intl_raw})
+
+            fmp_sem = asyncio.Semaphore(15)
+            llm_sem = asyncio.Semaphore(8)
+
+            async def _process_preselected(ticker: str):
+                if stop_event.is_set():
+                    return
+                co = all_map.get(ticker)
+                if not co:
+                    # Ticker not in our lists — build minimal stub for FMP lookup
+                    co = {"ticker": ticker, "name": ticker, "market_cap": 500_000_000,
+                          "country": "US", "exchange": "", "cik": None, "is_intl": False}
+                try:
+                    fin: dict = {}
+                    async with fmp_sem:
+                        fmp_fin = await _fetch_fmp_financials(client, ticker)
+                    if fmp_fin and not fmp_fin.get("excluded") and fmp_fin.get("revenue"):
+                        fin = fmp_fin
+                    elif co.get("is_intl"):
+                        async with llm_sem:
+                            fin = await _fetch_llm_financials(ticker, co["name"], co.get("country",""))
+
+                    if not fin or fin.get("excluded"):
+                        return
+
+                    mc = fin.get("market_cap_fmp") or co.get("market_cap") or 500_000_000
+                    country = fin.get("country") or co.get("country","US") or "US"
+
+                    # Skip debt instruments
+                    name = co.get("name","")
+                    _DEBT_KW = ("debenture","subordinated","notes due","% fixed","% senior",
+                                "preferred shares","depositary shares","warrant","rights",
+                                "unit trust","closed-end"," etf "," fund ")
+                    if any(kw in name.lower() for kw in _DEBT_KW):
+                        return
+
+                    company_info = {
+                        "ticker":              ticker,
+                        "name":                name,
+                        "exchange":            co.get("exchange",""),
+                        "country":             country[:10],
+                        "gics_sector":         (fin.get("sector") or "")[:100],
+                        "gics_industry":       "",
+                        "gics_industry_group": "",
+                        "gics_sub_industry":   "",
+                        "market_cap_usd":      float(mc) if mc else None,
+                        "description":         (fin.get("description") or "")[:2000],
+                        "website":             fin.get("website") or "",
+                        "cik":                 co.get("cik"),
+                        "is_founder_led":      fin.get("is_founder_led"),
+                        "is_active":           True,
+                    }
+                    metrics = _compute_metrics(ticker, mc, fin.get("shares_outstanding"), fin)
+
+                    results.append({"company": company_info, "metrics": metrics})
+                    n = len(results)
+                    rev = fin.get("revenue") or 0
+                    gm  = (fin.get("gross_profit") or 0) / rev * 100 if rev else 0
+                    logger.info("[%d/%d] %s %s $%.0fM rev=$%.0fM gm=%.0f%%",
+                                n, max_companies, country, ticker, (mc or 0)/1e6, rev/1e6, gm)
+                    if n >= max_companies:
+                        stop_event.set()
+                except Exception as e:
+                    logger.debug("Skip %s: %s", ticker, e)
+
+            await asyncio.gather(*[_process_preselected(t) for t in preselected_tickers],
+                                  return_exceptions=True)
+            logger.info("Fast path complete: %d companies with financials", len(results))
+            return results[:max_companies]
+
+        # ── Slow path: full universe scan (fallback) ──────────────────────────
         us_quota   = max_companies
         intl_quota = max_companies
 
@@ -918,6 +1001,7 @@ async def screen_universe_global(
             us_candidates = await _get_us_candidates(client, min_market_cap, max_market_cap)
             if exclude_tickers:
                 us_candidates = [c for c in us_candidates if c["ticker"] not in exclude_tickers]
+            us_candidates = us_candidates[:max_companies * 4]
             print(f"Processing {len(us_candidates)} US candidates (excl. {len(exclude_tickers or [])} already in DB)...", flush=True)
 
             # Two separate semaphores:
@@ -1081,12 +1165,17 @@ async def screen_universe_global(
                 if isinstance(r, dict):
                     intl_results.append(r)
 
-            # Merge: interleave US and intl so the final list is mixed, then cap at max_companies
+            # Merge: international FIRST (priority), then fill remaining slots with US
             import random as _random
             _random.shuffle(intl_results)
-            merged = []
-            us_iter   = iter(results)
-            intl_iter = iter(intl_results)
+            _random.shuffle(results)
+            # Intl gets priority — fills up to 50% of slots, rest is US
+            intl_quota_final = min(len(intl_results), max_companies // 2)
+            us_quota_final   = max_companies - intl_quota_final
+            merged = intl_results[:intl_quota_final] + results[:us_quota_final]
+            _random.shuffle(merged)  # shuffle so UI shows mixed, not grouped
+            us_iter   = iter([])   # already consumed above
+            intl_iter = iter([])
             while len(merged) < max_companies:
                 added = False
                 u = next(us_iter, None)

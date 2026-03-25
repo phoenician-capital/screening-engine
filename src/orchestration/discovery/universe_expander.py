@@ -33,6 +33,88 @@ class UniverseExpander:
         self.company_repo = CompanyRepository(session)
         self.metric_repo  = MetricRepository(session)
 
+    # ── Claude pre-screen: send full universe to Claude, get best 100 back ──────
+
+    async def _claude_prescreen(
+        self,
+        us_candidates: list[dict],
+        intl_candidates: list[dict],
+        target: int = 100,
+        existing_tickers: set[str] | None = None,
+    ) -> list[str]:
+        """
+        Send the full candidate universe to Claude with Phoenician Capital's
+        mandate and portfolio context. Claude returns the best `target` tickers.
+        This replaces brute-force FMP fetching of thousands of companies.
+        """
+        import json as _json
+        from src.shared.llm.client_factory import complete_with_search
+        from src.config.settings import settings
+        from src.prompts.loader import load_prompt
+
+        # Build candidate list — ticker + name + country/exchange for context
+        # Shuffle to avoid geographic bias
+        import random as _rng
+        all_candidates = (
+            [{"ticker": c["ticker"], "name": c["name"], "country": "US", "exchange": c.get("exchange","")} for c in us_candidates] +
+            [{"ticker": c["ticker"], "name": c["name"], "country": c.get("country",""), "exchange": c.get("exchange","")} for c in intl_candidates]
+        )
+        _rng.shuffle(all_candidates)
+
+        # Exclude already-in-DB tickers
+        if existing_tickers:
+            all_candidates = [c for c in all_candidates if c["ticker"] not in existing_tickers]
+
+        # Format candidate list compactly — ticker | name | country
+        candidate_lines = "\n".join(
+            f"{c['ticker']:12s} | {c['name'][:40]:40s} | {c['country']}"
+            for c in all_candidates
+        )
+
+        # Get portfolio for context
+        portfolio = await self.company_repo.get_active(limit=10000)
+        # Fall back to portfolio_holdings table
+        holdings = []
+        try:
+            from sqlalchemy import text
+            result = await self.session.execute(text("SELECT ticker, name, country FROM portfolio_holdings ORDER BY ticker"))
+            holdings = [{"ticker": r[0], "name": r[1], "country": r[2]} for r in result.fetchall()]
+        except Exception:
+            holdings = [{"ticker": c.ticker, "name": c.name, "country": c.country} for c in portfolio[:20]]
+
+        logger.info("Sending %d candidates to Claude for pre-screening (target: %d)...",
+                    len(all_candidates), target)
+
+        prompt = load_prompt(
+            "discovery/claude_universe_screen.j2",
+            portfolio=holdings,
+            total_candidates=len(all_candidates),
+            candidate_list=candidate_lines,
+        )
+
+        try:
+            response = await complete_with_search(
+                prompt=prompt,
+                model=settings.llm.primary_model,
+                max_tokens=2000,
+                temperature=0.1,
+                max_searches=0,  # no web search needed — we provide the list
+            )
+            # Parse JSON array from response
+            text = response.strip()
+            start = text.find("[")
+            end   = text.rfind("]")
+            if start != -1 and end != -1:
+                tickers = _json.loads(text[start:end+1])
+                tickers = [t.strip().upper() for t in tickers if isinstance(t, str)]
+                logger.info("Claude pre-screen returned %d tickers", len(tickers))
+                return tickers[:target]
+        except Exception as e:
+            logger.warning("Claude pre-screen failed: %s — falling back to random sample", e)
+
+        # Fallback: random sample
+        return [c["ticker"] for c in all_candidates[:target]]
+
     # ── Primary method: full EDGAR universe build ─────────────────────────────
 
     async def expand_via_screener(
@@ -43,20 +125,49 @@ class UniverseExpander:
         concurrency: int = 6,
     ) -> list[str]:
         """
-        Pull companies from EDGAR, filter by market cap, upsert to DB.
-        Returns list of tickers successfully added/updated.
+        Pull companies from EDGAR + intl list, ask Claude to pre-select best
+        100 candidates based on Phoenician mandate, then fetch financials for
+        only those 100. Much faster than processing 2000+ companies blind.
         """
         from src.config.settings import settings
+        import httpx
 
         min_cap = min_market_cap or settings.scoring.hard_min_market_cap
         max_cap = max_market_cap or settings.scoring.hard_max_market_cap
 
-        logger.info("Starting EDGAR universe build: $%.0fM – $%.0fB, max %d companies",
+        logger.info("Starting smart universe build: $%.0fM – $%.0fB, max %d companies",
                     min_cap / 1e6, max_cap / 1e9, max_companies)
 
-        # Get tickers already in DB so we skip them and always find new ones
+        # Step 1: Get existing tickers to exclude
         existing = await self.company_repo.get_active(limit=10000)
         existing_tickers = {c.ticker for c in existing}
+
+        # Step 2: Get raw candidate lists (names only, no financials yet)
+        from src.ingestion.sources.market_data.client import (
+            _get_us_candidates, _get_intl_candidates, _cache_get, _cache_set,
+            screen_universe_global
+        )
+        async with httpx.AsyncClient(timeout=20) as http_client:
+            logger.info("Fetching US + international candidate lists...")
+            us_raw   = await _get_us_candidates(http_client, min_cap, max_cap)
+            intl_raw = await _get_intl_candidates(http_client, min_cap, max_cap)
+
+        logger.info("Raw candidates: %d US + %d intl = %d total",
+                    len(us_raw), len(intl_raw), len(us_raw) + len(intl_raw))
+
+        # Step 3: Claude pre-screens to best 100 based on mandate + portfolio
+        preselected = await self._claude_prescreen(
+            us_candidates=us_raw,
+            intl_candidates=intl_raw,
+            target=max(100, max_companies * 4),
+            existing_tickers=existing_tickers,
+        )
+        logger.info("Claude pre-selected %d candidates for financial ingestion", len(preselected))
+
+        # Step 4: Fetch financials only for pre-selected tickers
+        # Build lookup maps
+        us_map   = {c["ticker"]: c for c in us_raw}
+        intl_map = {c["ticker"]: c for c in intl_raw}
 
         results = await screen_universe_global(
             min_market_cap=min_cap,
@@ -64,7 +175,9 @@ class UniverseExpander:
             max_companies=max_companies,
             concurrency=concurrency,
             exclude_tickers=existing_tickers,
-            include_intl=False,  # disabled until executor issue resolved on Render
+            include_us=True,
+            include_intl=True,
+            preselected_tickers=preselected,
         )
 
         # Use psycopg2 (sync) for DB writes — avoids asyncpg event loop issues
