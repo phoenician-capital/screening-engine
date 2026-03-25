@@ -231,14 +231,21 @@ class ScoringPipeline:
 
         # Rank and apply top-N limit from config
         from src.config.scoring_weights import load_scoring_weights as _lsw
+        from sqlalchemy import update as _update
         top_n = int(_lsw().get("ranking", {}).get("top_n_results", 5))
         ranked = self.ranker.rank(results)[:top_n]
+
+        # Flush pending recs to DB first, then update rank by ticker
+        await self.session.flush()
         for i, r in enumerate(ranked, 1):
-            # Update rank on the recommendation we just created
-            for rec_obj in self.session.new:
-                if isinstance(rec_obj, Recommendation) and rec_obj.ticker == r.ticker:
-                    rec_obj.rank = i
-                    break
+            await self.session.execute(
+                _update(Recommendation)
+                .where(
+                    Recommendation.scoring_run_id == scoring_run.id,
+                    Recommendation.ticker == r.ticker,
+                )
+                .values(rank=i)
+            )
 
         # 11. Update scoring run stats
         scoring_run.tickers_scored = len(companies)
