@@ -1,0 +1,8 @@
+# Copy this to terraform.tfvars and fill in your values:
+# cp terraform.tfvars.example terraform.tfvars
+
+# Your AWS key pair name (created in AWS Console → EC2 → Key Pairs)
+key_pair_name = "screening-engine-key"
+
+# Your current IP address — run: curl ifconfig.me
+your_ip = "1.2.3.4/32"
