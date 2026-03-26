@@ -187,6 +187,7 @@ class ScoringPipeline:
                         else None,
                     transcript_signals=transcript_signals,
                     historical=historical,
+                    portfolio_avg=portfolio_avg,
                 )
 
                 # 8. Risk score

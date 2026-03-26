@@ -102,10 +102,67 @@ def _build_financial_history(metrics: Metric, historical: list[dict] | None) -> 
     return "\n".join(lines)
 
 
+def _build_portfolio_context(portfolio_avg: dict | None) -> str:
+    """Build a concise portfolio context string for the agent."""
+    if not portfolio_avg or not portfolio_avg.get("holding_count"):
+        return "No portfolio context available."
+
+    lines = [f"Phoenician Capital currently holds {portfolio_avg.get('holding_count', 0)} positions:"]
+    if portfolio_avg.get("avg_gross_margin"):
+        lines.append(f"  Portfolio avg gross margin: {portfolio_avg['avg_gross_margin']*100:.1f}%")
+    if portfolio_avg.get("avg_roic"):
+        lines.append(f"  Portfolio avg ROIC:         {portfolio_avg['avg_roic']*100:.1f}%")
+    if portfolio_avg.get("avg_revenue_growth"):
+        lines.append(f"  Portfolio avg revenue growth: {portfolio_avg['avg_revenue_growth']*100:.1f}%")
+    if portfolio_avg.get("avg_fcf_yield"):
+        lines.append(f"  Portfolio avg FCF yield:    {portfolio_avg['avg_fcf_yield']*100:.1f}%")
+    if portfolio_avg.get("avg_net_debt_ebitda"):
+        lines.append(f"  Portfolio avg ND/EBITDA:    {portfolio_avg['avg_net_debt_ebitda']:.1f}x")
+
+    # Holdings list
+    holdings = portfolio_avg.get("holdings", [])
+    if holdings:
+        lines.append(f"  Holdings: {', '.join(h.get('ticker','') for h in holdings[:19])}")
+
+    return "\n".join(lines)
+
+
+def _build_sector_context(sector_medians: dict | None) -> str:
+    """Build sector median context for relative scoring."""
+    if not sector_medians:
+        return "No sector median data available — score on absolute basis."
+    lines = ["Sector peer medians (from Phoenician's screened universe):"]
+    if sector_medians.get("median_gross_margin"):
+        lines.append(f"  Median gross margin: {sector_medians['median_gross_margin']*100:.1f}%")
+    if sector_medians.get("median_roic"):
+        lines.append(f"  Median ROIC:         {sector_medians['median_roic']*100:.1f}%")
+    if sector_medians.get("median_ev_ebit"):
+        lines.append(f"  Median EV/EBIT:      {sector_medians['median_ev_ebit']:.1f}x")
+    return "\n".join(lines)
+
+
+def _build_valuation_context(metrics: Metric) -> str:
+    """Build valuation multiples string."""
+    lines = []
+    if metrics.ev_ebit:
+        lines.append(f"EV/EBIT:      {float(metrics.ev_ebit):.1f}x")
+    if metrics.ev_fcf:
+        lines.append(f"EV/FCF:       {float(metrics.ev_fcf):.1f}x")
+    if metrics.fcf_yield:
+        fy = float(metrics.fcf_yield)
+        if 0 < fy < 0.50:  # cap anomalies
+            lines.append(f"FCF Yield:    {fy*100:.1f}%")
+    if metrics.net_debt_ebitda:
+        lines.append(f"ND/EBITDA:    {float(metrics.net_debt_ebitda):.1f}x")
+    return "\n".join(lines) if lines else "Valuation data unavailable"
+
+
 def _load_analyst_prompts(
     company: Company,
     metrics: Metric,
     financial_history_str: str,
+    portfolio_avg: dict | None = None,
+    sector_medians: dict | None = None,
 ) -> tuple[str, str]:
     """Load system and scoring prompts from Jinja2 templates."""
     from src.prompts.loader import load_prompt
@@ -117,8 +174,11 @@ def _load_analyst_prompts(
         country=company.country or "Unknown",
         sector=company.gics_sector or "Unknown",
         market_cap=_usd(float(metrics.market_cap_usd) if metrics.market_cap_usd else None),
-        description=(company.description or "")[:400],
+        description=(company.description or "")[:600],
         financial_history=financial_history_str,
+        valuation_context=_build_valuation_context(metrics),
+        portfolio_context=_build_portfolio_context(portfolio_avg),
+        sector_context=_build_sector_context(sector_medians),
     )
     return system, user
 
@@ -127,6 +187,8 @@ async def score_with_analyst_agent(
     company: Company,
     metrics: Metric,
     historical: list[dict] | None = None,
+    portfolio_avg: dict | None = None,
+    sector_medians: dict | None = None,
 ) -> list[CriterionScore]:
     """
     Use Claude as a financial analyst agent to score the company.
@@ -138,13 +200,15 @@ async def score_with_analyst_agent(
         from src.config.settings import settings
 
         fin_history = _build_financial_history(metrics, historical)
-        system, prompt = _load_analyst_prompts(company, metrics, fin_history)
+        system, prompt = _load_analyst_prompts(
+            company, metrics, fin_history, portfolio_avg, sector_medians
+        )
 
         response = await complete_with_search(
             prompt=prompt,
             system=system,
             model=settings.llm.primary_model,
-            max_searches=0,  # no search — we provide all data
+            max_searches=2,  # 2 searches: business model + recent developments
             temperature=0.1,
         )
 
@@ -181,11 +245,23 @@ async def score_with_analyst_agent(
                 weight=1.0, evidence=f"[Agent {raw_score}/100] {evidence}"
             ))
 
-        # Log verdict
-        verdict = data.get("analyst_verdict", "")
-        note    = data.get("analyst_note", "")
-        logger.info("Analyst agent for %s: verdict=%s note=%s",
-                    company.ticker, verdict, note[:80])
+        # Log verdict + thesis
+        verdict   = data.get("analyst_verdict", "")
+        note      = data.get("analyst_note", "")
+        thesis    = data.get("investment_thesis", "")
+        questions = data.get("diligence_questions", [])
+        logger.info("Analyst agent for %s: verdict=%s | %s", company.ticker, verdict, note[:100])
+
+        # Store thesis + diligence questions as a special criterion for display in memo
+        if thesis or questions:
+            q_text = " | ".join(questions[:3]) if questions else ""
+            criteria.append(CriterionScore(
+                name="analyst_thesis",
+                score=0.0,
+                max_score=0.0,  # excluded from scoring — display only
+                weight=0.0,
+                evidence=f"THESIS: {thesis} | DILIGENCE: {q_text} | VERDICT: {verdict}",
+            ))
 
         return criteria
 

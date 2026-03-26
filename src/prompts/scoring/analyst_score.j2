@@ -1,4 +1,11 @@
-Conduct an investment quality assessment for the following company on behalf of Phoenician Capital. Your analysis must be grounded in the financial data provided. Every score must be justified with specific numbers.
+Conduct a full investment quality assessment for the following company on behalf of Phoenician Capital.
+
+You have access to web search — use it to:
+1. Understand what the business actually does, its competitive position, and business model (1 search)
+2. Find any recent material developments: earnings commentary, strategic announcements, competitive threats (1 search)
+
+Ground your scores in both the financial data provided AND what you find through research.
+Every score must be justified with specific numbers and specific qualitative observations.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 COMPANY PROFILE
@@ -8,187 +15,199 @@ Ticker:       {{ ticker }}
 Geography:    {{ country }}
 Sector:       {{ sector }}
 Market Cap:   {{ market_cap }}
-Business:     {{ description }}
+Description:  {{ description }}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FINANCIAL DATA
+FINANCIAL HISTORY (5-YEAR)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {{ financial_history }}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SCORING FRAMEWORK
+CURRENT VALUATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{ valuation_context }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTOR PEER CONTEXT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{ sector_context }}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+PHOENICIAN CAPITAL PORTFOLIO CONTEXT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{ portfolio_context }}
+
+Use this to assess: does this company add diversification or concentration?
+Is it a higher/lower quality version of something we already own?
+Does it complement the existing portfolio or overlap with it?
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCORING FRAMEWORK — 6 DIMENSIONS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Evaluate the company on six dimensions. Each dimension is scored 0–100.
-Reference specific numbers from the financial data above in every evidence field.
-If data is insufficient to score a dimension, score it 0 and state clearly what is missing.
+Score each dimension 0–100. Use the full range. Be differentiated.
+Reference specific numbers in every evidence field.
+If data is missing, score 0 and state explicitly what is missing.
 
 ─────────────────────────────────────────
 DIMENSION 1: BUSINESS QUALITY (0–100)
 ─────────────────────────────────────────
-This dimension assesses the structural quality of the business model — the durability of margins,
-the evidence of pricing power, and the consistency of revenue growth over time.
+Assess the structural quality of the business model. Use your web search findings here.
 
-Analytical framework:
-  → Gross margin: absolute level vs. sector norms, and multi-year trend (expanding/stable/contracting)
-  → Operating leverage: does revenue growth translate to disproportionate EBIT growth?
-  → Revenue growth: multi-year CAGR, not just YoY; is growth consistent year-over-year or lumpy?
-  → Net income growing faster than revenue = margin expansion = pricing power evidence
-  → Compare gross margin trend to revenue growth trend: divergence is a red flag
+→ What is the actual competitive moat? (brand, switching costs, network effects, IP, regulatory, scale)
+→ Gross margin: absolute level vs sector norms, and multi-year trend (expanding/stable/contracting)
+→ Operating leverage: does revenue growth drop through to EBIT disproportionately?
+→ Revenue growth: multi-year CAGR, not just YoY — is growth consistent or lumpy?
+→ NI growing faster than revenue = margin expansion = pricing power evidence
+→ What does your research reveal about competitive dynamics and moat durability?
 
-Scoring calibration:
-  91–100  Rare — gross margin 70%+, consistent 20%+ revenue CAGR, clear margin expansion,
-          visible pricing power (NI growing meaningfully faster than revenue)
-  76–90   Excellent — gross margin 50–70%, consistent 12–20% CAGR, stable/expanding margins
-  61–75   Good — gross margin 30–50%, consistent 8–12% CAGR, broadly stable margins
-  41–60   Average — gross margin 20–30%, moderate growth (3–8%), mixed margin trend
-  21–40   Below average — gross margin < 20%, slow/declining growth, margin pressure
-  0–20    Structurally challenged — negative margins, revenue declining, or commoditised
+Calibration:
+  91–100  Rare — GM 70%+, 20%+ CAGR, clear margin expansion, verified durable moat
+  76–90   Excellent — GM 50–70%, 12–20% CAGR, stable/expanding margins, identifiable moat
+  61–75   Good — GM 30–50%, 8–12% CAGR, broadly stable, some competitive advantage
+  41–60   Average — GM 20–30%, 3–8% growth, mixed margin trend, limited differentiation
+  21–40   Below average — GM < 20%, slow/declining growth, or margin contraction
+  0–20    Structurally challenged — negative margins, declining revenue, commoditised
 
 ─────────────────────────────────────────
 DIMENSION 2: UNIT ECONOMICS & CASH GENERATION (0–100)
 ─────────────────────────────────────────
-This dimension assesses whether the reported earnings are backed by real cash generation —
-the hallmark of a capital-light compounder vs. an accrual-heavy business.
+Assess whether reported earnings are backed by real cash. This is the quality check.
 
-Analytical framework:
-  → FCF/Net Income ratio: the single most important check — < 0.7x raises serious concerns
-  → FCF yield: free cash flow as % of market cap — is the business cheap on a cash basis?
-  → Capex/Revenue: < 5% = asset-light; 5–10% = moderate; > 15% = capital-intensive
-  → Is FCF growing faster than revenue? (leverage on the P&L flowing through to cash)
-  → Operating cash flow vs. net income divergence signals accrual risk
+→ FCF/Net Income ratio — the single most important check (< 0.7x raises serious concerns)
+→ FCF yield — free cash flow as % of market cap
+→ Capex/Revenue — < 5% asset-light; 5–10% moderate; > 15% capital-intensive
+→ Is FCF growing faster than revenue? (operating leverage flowing to cash)
+→ Any divergence between operating cash flow and net income?
 
-Scoring calibration:
-  91–100  Exceptional — FCF/NI > 1.1x, FCF yield > 7%, capex/rev < 5%, FCF growing > revenue
-  76–90   Strong — FCF/NI > 0.9x, FCF yield > 5%, low capex, clean cash conversion
-  61–75   Good — FCF/NI > 0.75x, FCF yield > 3%, manageable capex
-  41–60   Average — FCF/NI 0.5–0.75x, FCF yield 1–3%, moderate capex
-  21–40   Weak — FCF below NI, high capex, or FCF yield < 1%
-  0–20    Poor — negative FCF, FCF/NI < 0.5x, or data entirely missing
+Calibration:
+  91–100  FCF/NI > 1.1x, FCF yield > 7%, capex/rev < 5%, FCF growing faster than revenue
+  76–90   FCF/NI > 0.9x, FCF yield > 5%, low capex, clean cash conversion
+  61–75   FCF/NI > 0.75x, FCF yield > 3%, manageable capex
+  41–60   FCF/NI 0.5–0.75x, FCF yield 1–3%, moderate capex
+  21–40   FCF below NI, high capex, or FCF yield < 1%
+  0–20    Negative FCF, FCF/NI < 0.5x, or data entirely missing
 
 ─────────────────────────────────────────
 DIMENSION 3: RETURNS ON CAPITAL (0–100)
 ─────────────────────────────────────────
-ROIC is the single most predictive metric of long-term value creation. A business that earns
-25% ROIC consistently will compound intrinsic value at that rate regardless of valuation starting point.
+ROIC is the single most predictive metric of long-term value creation.
 
-Analytical framework:
-  → ROIC level: compare to estimated WACC (assume 8–10% for most businesses)
-  → ROIC trend: improving suggests moat widening; declining suggests competitive erosion
-  → ROIC consistency: volatile ROIC signals cyclicality or execution risk
-  → ROE cross-check: if ROE >> ROIC, leverage is driving returns (not economic quality)
-  → Marginal ROIC: for growing companies, is the incremental capital deployed at high returns?
+→ ROIC level: compare to estimated WACC (assume 8–10% for most businesses)
+→ ROIC trend: improving = moat widening; declining = competitive erosion
+→ ROIC consistency: volatile ROIC signals cyclicality or execution risk
+→ ROE cross-check: if ROE >> ROIC, leverage is driving returns (not economic quality)
+→ For growing companies: is incremental capital deployed at high returns?
 
-Scoring calibration:
-  91–100  Exceptional — ROIC > 30% sustained, improving trend, clearly above cost of capital
-  76–90   Excellent — ROIC 20–30%, stable or improving, strong spread over WACC
-  61–75   Good — ROIC 12–20%, stable, meaningful spread over WACC
-  41–60   Average — ROIC 7–12%, minimal spread over WACC
-  21–40   Below average — ROIC 3–7%, close to cost of capital, limited value creation
-  0–20    Value-destroying — ROIC < 3%, negative, or no data
+Calibration:
+  91–100  ROIC > 30% sustained, improving trend, strongly above cost of capital
+  76–90   ROIC 20–30%, stable or improving, strong spread over WACC
+  61–75   ROIC 12–20%, stable, meaningful spread over WACC
+  41–60   ROIC 7–12%, minimal spread over WACC
+  21–40   ROIC 3–7%, close to cost of capital, limited value creation
+  0–20    ROIC < 3%, negative, or no data
 
 ─────────────────────────────────────────
 DIMENSION 4: GROWTH QUALITY & COMPOUNDING TRACK RECORD (0–100)
 ─────────────────────────────────────────
 THIS IS THE MOST CRITICAL DIMENSION FOR IDENTIFYING GENUINE COMPOUNDERS.
 
-A consistent 15% grower for 5 years is worth far more than a 30% one-year grower followed by
-declines. Consistency of growth is the primary differentiator between compounders and mediocre businesses.
+A consistent 15% grower for 5 years >> a 30% one-year grower followed by declines.
+Consistency is the primary differentiator. Compute it rigorously.
 
-Analytical framework:
-  → Revenue multi-year CAGR: compute across the full available historical period
-  → Net income multi-year CAGR: compare to revenue CAGR — NI CAGR > Rev CAGR = margin expansion
-  → Growth consistency: compute year-over-year growth rates for each year and assess variance
-    Low variance (all years within ±5pp of the mean) = high quality
-    High variance (years ranging from -10% to +40%) = low quality, lumpy, or cyclical
-  → Growth trajectory: is the most recent growth rate above or below the historical average?
-    Accelerating = positive signal; decelerating = scrutinise carefully
-  → Down years: any year with negative revenue growth is a significant penalty
-  → Organic vs. inorganic: if growth is acquisition-driven, ROIC may be masking the truth
+→ Revenue CAGR across full available period (not just YoY)
+→ NI CAGR vs revenue CAGR — NI CAGR > Rev CAGR = margin expansion = moat evidence
+→ Growth consistency: compute each year's growth rate and assess variance
+   Low variance (all years within ±5pp of mean) = high quality
+   High variance (years ranging from -10% to +40%) = low quality, lumpy, cyclical
+→ Growth trajectory: most recent rate above or below historical average?
+   Accelerating = positive; decelerating = scrutinise carefully
+→ Down years: any year with negative revenue growth = significant penalty
+→ Your research: is this growth organic or acquisition-driven?
 
-Scoring calibration:
-  91–100  Elite compounder — Revenue CAGR 20%+, NI CAGR > Rev CAGR, near-zero variance,
-          no down years, growth accelerating or stable
-  76–90   Excellent — Revenue CAGR 12–20%, NI CAGR > Rev CAGR, low variance, no down years
-  61–75   Good — Revenue CAGR 8–12%, positive NI expansion, moderate consistency
-  41–60   Average — Revenue CAGR 4–8%, NI roughly in line, some year-to-year variation
-  21–40   Below average — Revenue CAGR < 4%, or significant variance, or 1–2 down years
-  0–20    Declining or erratic — revenue shrinking overall, multiple down years, or highly volatile
+Calibration:
+  91–100  Revenue CAGR 20%+, NI CAGR > Rev CAGR, near-zero variance, no down years
+  76–90   Revenue CAGR 12–20%, NI CAGR > Rev CAGR, low variance, no down years
+  61–75   Revenue CAGR 8–12%, positive NI expansion, moderate consistency
+  41–60   Revenue CAGR 4–8%, NI roughly in line, some year-to-year variation
+  21–40   Revenue CAGR < 4%, significant variance, or 1–2 down years
+  0–20    Revenue declining overall, multiple down years, or highly volatile
 
 ─────────────────────────────────────────
 DIMENSION 5: BALANCE SHEET STRENGTH (0–100)
 ─────────────────────────────────────────
-A strong balance sheet is optionality — it enables counter-cyclical investment, buybacks at lows,
-and bolt-on acquisitions. A leveraged balance sheet is a constraint.
+A strong balance sheet is optionality. A leveraged one is a constraint.
 
-Analytical framework:
-  → Net debt position: net cash (negative net debt) is the gold standard
-  → Net Debt/EBITDA: primary leverage metric
-  → Interest coverage: EBIT / interest expense (> 10x = comfortable; < 3x = concerning)
-  → Balance sheet trajectory: is leverage increasing or decreasing over time?
-  → Goodwill as % of total assets: > 50% signals acquisition risk and intangible-heavy balance sheet
+→ Net debt position: net cash (negative net debt) is the gold standard
+→ Net Debt/EBITDA — primary leverage metric
+→ Interest coverage: EBIT / interest (> 10x comfortable; < 3x concerning)
+→ Balance sheet trajectory: leverage increasing or decreasing?
+→ Goodwill as % of total assets: > 50% signals acquisition-heavy, intangible-heavy risk
 
-Scoring calibration:
-  91–100  Fortress — net cash position, zero leverage, financial optionality fully open
-  76–90   Strong — low leverage (< 0.5x ND/EBITDA), substantial financial flexibility
-  61–75   Good — moderate leverage (0.5–1.5x), comfortable coverage, no near-term concerns
-  41–60   Adequate — leverage 1.5–2.5x, manageable but limits strategic flexibility
-  21–40   Stretched — leverage 2.5–4x, or goodwill-heavy, or declining coverage
-  0–20    Distressed — leverage > 4x, or covenant risk, or negative equity signals
+Calibration:
+  91–100  Fortress — net cash, zero leverage, full financial optionality
+  76–90   Strong — leverage < 0.5x ND/EBITDA, substantial flexibility
+  61–75   Good — 0.5–1.5x ND/EBITDA, comfortable coverage
+  41–60   Adequate — 1.5–2.5x ND/EBITDA, manageable but limits flexibility
+  21–40   Stretched — 2.5–4x ND/EBITDA or goodwill-heavy
+  0–20    Distressed — > 4x leverage, covenant risk, or negative equity signals
 
 ─────────────────────────────────────────
 DIMENSION 6: PHOENICIAN CAPITAL FIT (0–100)
 ─────────────────────────────────────────
-Holistic qualitative judgment integrating all five dimensions above with Phoenician's specific mandate.
-This is your overall assessment as a senior analyst — does this company deserve further research?
+Holistic judgment synthesising all five dimensions + portfolio context + your research.
+This is your overall conviction score as a senior analyst.
 
-Analytical framework:
-  → Owner/founder alignment: company age, CEO tenure, ownership structure, insider buying history
-  → Moat durability: how sustainable are the high returns? Is the competitive position widening?
-  → Business model scalability: can this grow 5–10x without proportional capital reinvestment?
-  → Information edge: is this genuinely under-followed? ($250M–$2B market cap, limited analyst coverage)
-  → Valuation context: given growth rate and ROIC, is current valuation attractive, fair, or stretched?
-    (A 20x EV/EBIT for a 20% ROIC, 15% compounder is CHEAP. A 10x EV/EBIT for a 6% ROIC grower is EXPENSIVE.)
-  → Portfolio fit: does this complement Phoenician's existing holdings in geography, sector, and style?
-  → Red flags: any accounting concerns, governance issues, key-person risk, customer concentration?
+→ Portfolio comparison: how does this compare to what Phoenician already owns?
+   Is it additive (new geography, new sector) or duplicative?
+   Is it a higher or lower quality version of an existing holding?
+→ Owner alignment: founder-led signals, CEO tenure, insider ownership
+→ Moat durability: what does your research reveal about competitive position sustainability?
+→ Scalability: can this grow 5–10x without proportional capital reinvestment?
+→ Information edge: genuinely under-followed? ($250M–$2B, limited sell-side coverage)
+→ Valuation: given ROIC and growth, is the current multiple attractive, fair, or stretched?
+   Key heuristic: EV/EBIT ÷ ROIC = "price per unit of return"
+   < 1.0x = potentially cheap; 1.5–2.0x = fair; > 2.5x = expensive
+→ Red flags from your research: governance, customer concentration, key-person risk
 
-Scoring calibration:
-  91–100  Exceptional — must investigate immediately; rare business with all criteria firing
-  76–90   High conviction — strong compounder candidate, one or two manageable concerns
-  61–75   Interesting — quality business, worth deeper research, some gaps to address
-  41–60   Marginal — some interesting attributes, but insufficient differentiation for Phoenician
-  21–40   Weak fit — does not meet Phoenician's quality or growth standards
+Calibration:
+  91–100  Must investigate immediately — rare, all criteria firing, portfolio-additive
+  76–90   High conviction — strong compounder, one or two manageable concerns
+  61–75   Interesting — quality business, worth deeper research, some gaps
+  41–60   Marginal — interesting but insufficient differentiation for Phoenician
+  21–40   Weak fit — below Phoenician's quality or growth standards
   0–20    No fit — fundamentally incompatible with mandate
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUT REQUIREMENTS
+OUTPUT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Rules:
-1. Every evidence field MUST cite specific numbers from the financial data above
-2. Evidence must reference trends, not just point-in-time values (e.g., "revenue CAGR of 14% over 4 years" not "revenue grew 14%")
-3. Scores must be calibrated: average global companies score 40–55, exceptional ones 80+
-4. analyst_verdict must be RESEARCH NOW, WATCH, or PASS — no other values
-5. analyst_note is the single most important sentence about this company — make it specific
+1. Every evidence field MUST cite specific numbers from the financial data
+2. Evidence must reference TRENDS not just point-in-time (e.g. "revenue CAGR of 14% over 4 years" not "revenue grew 14%")
+3. Use web search findings to enrich business_quality and phoenician_fit evidence
+4. investment_thesis must be ONE sentence: bull case + key risk in the same breath
+5. diligence_questions must be company-specific, not generic — questions a real analyst needs answered
+6. analyst_verdict: RESEARCH NOW = investigate within 2 weeks; WATCH = monitor for better entry; PASS = not for Phoenician
 
 Return ONLY this JSON:
 
 {
   "business_quality": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences citing gross margin %, trend, revenue CAGR, and NI vs revenue growth>"
+    "evidence": "<2-3 sentences citing gross margin %, trend, revenue CAGR, NI vs revenue growth, and moat source from research>"
   },
   "unit_economics": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences citing FCF/NI ratio, FCF yield %, and capex/revenue %>"
+    "evidence": "<2-3 sentences citing FCF/NI ratio, FCF yield %, capex/revenue %, and cash conversion quality>"
   },
   "capital_returns": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences on ROIC level, ROIC trend, and spread over estimated WACC>"
+    "evidence": "<2-3 sentences on ROIC level, ROIC trend over available period, and spread over estimated WACC>"
   },
   "growth_quality": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences on revenue CAGR, NI CAGR, year-to-year consistency, and trajectory>"
+    "evidence": "<2-3 sentences on revenue CAGR, NI CAGR vs revenue CAGR, year-to-year consistency, and trajectory>"
   },
   "balance_sheet": {
     "score": <0-100>,
@@ -196,8 +215,14 @@ Return ONLY this JSON:
   },
   "phoenician_fit": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences synthesising mandate alignment, moat assessment, and key differentiators>"
+    "evidence": "<2-3 sentences on portfolio comparison, moat assessment, valuation context, and mandate alignment>"
   },
+  "investment_thesis": "<One sentence: bull case + key risk in the same breath, with specific numbers>",
+  "diligence_questions": [
+    "<Specific question 1 — must be answerable through public research>",
+    "<Specific question 2>",
+    "<Specific question 3>"
+  ],
   "analyst_verdict": "<RESEARCH NOW | WATCH | PASS>",
-  "analyst_note": "<One specific, data-grounded sentence summarising the single most important thing about this company>"
+  "analyst_note": "<One specific, data-grounded sentence: the single most important thing about this company>"
 }
