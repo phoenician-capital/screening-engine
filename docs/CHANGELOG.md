@@ -223,5 +223,29 @@ None of these existed before. All are additive bonuses — they can only help a 
 
 ---
 
+## 12. AI Financial Analyst Agent (Latest)
+
+### Before
+- Pure Python threshold scoring: `if roic >= 0.20: score = 5 points`
+- No trend analysis — only point-in-time numbers
+- No context: agent didn't know the portfolio, sector medians, or past decisions
+- No qualitative output beyond a memo
+
+### Now
+- **Claude-powered analyst agent** scores every company across 6 institutional-grade dimensions
+- **5-year financial history**: reads revenue CAGR, NI CAGR, year-to-year consistency, margin expansion
+- **Web search**: 2 searches per company — business model + recent developments
+- **Portfolio context**: knows your 19 holdings' avg metrics, compares candidate against them
+- **Sector medians**: scores relative to sector peers, not absolute thresholds
+- **Feedback learning**: reads last 60 days of your decisions, calibrates to Phoenician's revealed preferences
+- **Investment thesis**: one sentence bull case + key risk with specific numbers
+- **Analyst verdict**: RESEARCH NOW / WATCH / PASS — pre-highlights the action button in UI
+- **Diligence checklist**: 3 company-specific questions before conviction
+- **Reject reasons enriched**: your diligence questions appear as reject reason options
+
+**Net effect:** QLYS (83% GM, 28% ROIC, consistent 15% CAGR) now scores 80+ while FLYW (0.8% ROIC) scores 35. Rankings are meaningful.
+
+---
+
 *Confidential — Internal Use Only*
 *Phoenician Capital Investment Technology*

@@ -155,14 +155,30 @@ The Fit Score is no longer computed by Python thresholds. It is assessed by a Cl
 
 | Dimension | What the Agent Assesses |
 |---|---|
-| **Business Quality** | Gross margin level + trend, revenue CAGR, NI vs revenue growth (margin expansion evidence), pricing power signals |
+| **Business Quality** | Gross margin level + trend, revenue CAGR, NI vs revenue growth (margin expansion evidence), pricing power signals from web search |
 | **Unit Economics** | FCF/NI ratio (earnings quality), FCF yield, capex intensity, FCF growing faster than revenue |
 | **Capital Returns** | ROIC level, ROIC trend (moat widening vs. eroding), spread over WACC |
 | **Growth Quality** | Revenue CAGR over full period, NI CAGR vs revenue CAGR, year-to-year consistency, down years, trajectory |
 | **Balance Sheet** | Net cash vs. net debt, ND/EBITDA, interest coverage, financial flexibility |
-| **Phoenician Fit** | Holistic mandate alignment — moat, founder alignment, scalability, information edge, valuation context |
+| **Phoenician Fit** | Holistic mandate alignment — portfolio comparison, moat durability from research, valuation context, information edge |
 
-**Supplementary Python signals (additive):**
+**What the agent also produces (shown in the UI):**
+- **Investment Thesis** — one sentence: bull case + key risk with specific numbers
+- **Analyst Verdict** — RESEARCH NOW / WATCH / PASS with a highlighted banner
+- **Diligence Checklist** — 3 company-specific questions the analyst must answer before conviction
+- **Suggested Action** — the verdict pre-highlights the Research Now button when agent says RESEARCH NOW
+
+**Context the agent receives:**
+- 5 years of financial history (revenue, gross profit, EBIT, net income, FCF, capex)
+- Current valuation multiples (EV/EBIT, EV/FCF, P/E, FCF yield, ND/EBITDA)
+- Sector peer medians (from DB + hardcoded fallbacks per sector)
+- Portfolio context (your 19 holdings' avg margins, ROIC, growth, leverage)
+- Recent analyst decisions (last 60 days of Research Now / Watch / Reject with reasons)
+- Web search (2 searches: business model + recent developments)
+
+**Feedback learning:** Every Research Now, Watch, and Reject you make is recorded. On the next run, the agent reads your last 60 days of decisions and calibrates its scores to match Phoenician's revealed preferences. The more decisions you make, the smarter the agent gets.
+
+**Supplementary Python signals (additive on top of agent score):**
 - **Founder & Ownership** — founder-led detection, insider ownership %, Form 4 insider buying activity
 - **Quality Trifecta** (+5 pts): GM > 50% AND ROIC > 15% AND FCF yield > 5% simultaneously
 - **Capital Allocation** (+6 pts): Active buybacks, low stock dilution, disciplined M&A
