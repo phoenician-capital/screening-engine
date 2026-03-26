@@ -371,15 +371,46 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
     roe  = km.get("returnOnEquity")
 
     # Sector from profile
-    sector = pro.get("sector", "") if isinstance(pro, dict) else ""
-    country = pro.get("country", "") if isinstance(pro, dict) else ""
-    website = pro.get("website", "") if isinstance(pro, dict) else ""
+    sector      = pro.get("sector", "")      if isinstance(pro, dict) else ""
+    country     = pro.get("country", "")     if isinstance(pro, dict) else ""
+    website     = pro.get("website", "")     if isinstance(pro, dict) else ""
     description = pro.get("description", "") if isinstance(pro, dict) else ""
-    is_etf = pro.get("isEtf", False) if isinstance(pro, dict) else False
+    ceo_name    = pro.get("ceo", "")         if isinstance(pro, dict) else ""
+    ipo_date    = pro.get("ipoDate", "")     if isinstance(pro, dict) else ""
+    company_name_pro = pro.get("companyName", "") if isinstance(pro, dict) else ""
+    is_etf  = pro.get("isEtf",  False) if isinstance(pro, dict) else False
     is_fund = pro.get("isFund", False) if isinstance(pro, dict) else False
 
     if is_etf or is_fund:
         return {"excluded": True}
+
+    # ── Founder detection ──────────────────────────────────────────────────────
+    # Heuristic: if company is < 25 years old AND CEO has been there a long time
+    # OR if CEO last name appears in company name (eponymous founders)
+    is_founder_led = None
+    try:
+        import datetime as _dt
+        if ipo_date and ceo_name:
+            ipo_year = int(str(ipo_date)[:4])
+            company_age = _dt.date.today().year - ipo_year
+            ceo_last = ceo_name.strip().split()[-1].lower() if ceo_name.strip() else ""
+            name_lower = (company_name_pro or ticker).lower()
+
+            # Strong signal: CEO last name in company name (e.g. Bezos/Amazon excluded but
+            # Walton/Walmart, Wozniak/Apple type patterns)
+            if len(ceo_last) > 3 and ceo_last in name_lower:
+                is_founder_led = True
+            # Moderate signal: company < 20 years old (founder likely still at helm)
+            elif company_age <= 20:
+                is_founder_led = True
+            # Professional management signal: large old company
+            elif company_age >= 40 and market_cap and market_cap > 5e9:
+                is_founder_led = False
+    except Exception:
+        pass
+
+    # ── Insider / institutional ownership from key-metrics ───────────────────
+    insider_ownership_pct = km.get("insiderOwnershipTTM") or km.get("insiderOwnership")
 
     # EV metrics
     ev_ebitda   = km.get("evToEBITDA")
@@ -393,31 +424,34 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
                 (roic or 0) * 100)
 
     result = {
-        "sector":       sector,
-        "country":      country,
-        "website":      website,
-        "description":  description,
-        "revenue":      revenue,
-        "gross_profit": gross_profit,
-        "ebit":         ebit,
-        "net_income":   net_income,
-        "fcf":          fcf,
-        "capex":        capex,
-        "cash":         cash,
-        "total_debt":   None,
-        "net_debt":     None,
-        "ebitda":       ebitda,
-        "total_assets": None,
-        "equity":       None,
-        "rev_series":   [rev1, revenue] if rev1 and revenue else ([revenue] if revenue else []),
-        "revenue_growth": rev_yoy,
-        "roic":         roic,
-        "roe":          roe,
+        "sector":               sector,
+        "country":              country,
+        "website":              website,
+        "description":          description,
+        "revenue":              revenue,
+        "gross_profit":         gross_profit,
+        "ebit":                 ebit,
+        "net_income":           net_income,
+        "fcf":                  fcf,
+        "capex":                capex,
+        "cash":                 cash,
+        "total_debt":           None,
+        "net_debt":             None,
+        "ebitda":               ebitda,
+        "total_assets":         None,
+        "equity":               None,
+        "rev_series":           [rev1, revenue] if rev1 and revenue else ([revenue] if revenue else []),
+        "revenue_growth":       rev_yoy,
+        "roic":                 roic,
+        "roe":                  roe,
         "net_debt_ebitda_direct": net_debt_ebitda,
-        "ev_ebitda_direct":       ev_ebitda,
-        "fcf_yield_direct":       fcf_yield,
-        "capex_rev_direct":       capex_rev,
-        "market_cap_fmp":         market_cap,
+        "ev_ebitda_direct":     ev_ebitda,
+        "fcf_yield_direct":     fcf_yield,
+        "capex_rev_direct":     capex_rev,
+        "market_cap_fmp":       market_cap,
+        "is_founder_led":       is_founder_led,
+        "insider_ownership_pct": insider_ownership_pct,
+        "ceo_name":             ceo_name,
     }
     _cache_set(f"fmp:fin:{ticker}", result, ttl=86400)  # cache 24h
     return result
@@ -972,6 +1006,7 @@ async def screen_universe_global(
                         "website":             fin.get("website") or "",
                         "cik":                 co.get("cik"),
                         "is_founder_led":      fin.get("is_founder_led"),
+                        "founder_name":        fin.get("ceo_name") or "",
                         "is_active":           True,
                     }
                     metrics = _compute_metrics(ticker, mc, fin.get("shares_outstanding"), fin)

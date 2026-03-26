@@ -185,12 +185,23 @@ class FitScorer:
             if company.country and company.country not in ("US", ""):
                 has_intl = True
 
-            # Recurring revenue: broader sector heuristics
-            sector = (company.gics_sector or "").lower()
-            gm = float(metrics.gross_margin) if metrics.gross_margin is not None else 0
-            recurring_sectors = ("technology", "software", "healthcare", "financial services")
-            if any(s in sector for s in recurring_sectors) and gm > 0.50:
+            # Recurring revenue: keyword scan in company description
+            desc = (company.description or "").lower() if hasattr(company, "description") else ""
+            _RECURRING_KEYWORDS = (
+                "subscription", "saas", "software-as-a-service", "recurring revenue",
+                "annual recurring", "maintenance contract", "service contract",
+                "managed services", "licensing", "royalt", "platform fee",
+                "monthly active", "annual contract value", "arr ", "mrr ",
+            )
+            if any(kw in desc for kw in _RECURRING_KEYWORDS):
                 has_recurring = True
+            else:
+                # Sector heuristic fallback
+                sector = (company.gics_sector or "").lower()
+                gm = float(metrics.gross_margin) if metrics.gross_margin is not None else 0
+                recurring_sectors = ("technology", "software", "healthcare services")
+                if any(s in sector for s in recurring_sectors) and gm > 0.60:
+                    has_recurring = True
 
         scale_scores = score_scalability(
             has_tam_narrative=None,
