@@ -75,6 +75,7 @@ class FitScorer:
         transcript_signals: dict | None = None,
         historical: list[dict] | None = None,
         portfolio_avg: dict | None = None,
+        feedback_context: str | None = None,
     ) -> tuple[float, list[CriterionScore]]:
         import asyncio as _asyncio
         from src.scoring.engine.analyst_agent import score_with_analyst_agent
@@ -91,13 +92,13 @@ class FitScorer:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
                     agent_future = ex.submit(
                         lambda: _asyncio.run(
-                            score_with_analyst_agent(company, metrics, historical, portfolio_avg, sector_medians)
+                            score_with_analyst_agent(company, metrics, historical, portfolio_avg, sector_medians, feedback_context)
                         )
                     )
                     agent_criteria = agent_future.result(timeout=60)
             else:
                 agent_criteria = loop.run_until_complete(
-                    score_with_analyst_agent(company, metrics, historical, portfolio_avg, sector_medians)
+                    score_with_analyst_agent(company, metrics, historical, portfolio_avg, sector_medians, feedback_context)
                 )
         except Exception as e:
             logger.warning("Agent scoring failed for %s: %s", company.ticker, e)

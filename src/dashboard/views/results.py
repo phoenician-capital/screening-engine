@@ -376,11 +376,47 @@ def render() -> None:
             </div>
             """, unsafe_allow_html=True)
 
-            # Investment Memo — always shown
             memo = row.get("memo_text")
             pc   = row.get("portfolio_comparison") or {}
             sd   = row.get("scoring_detail") or {}
+            criteria = sd.get("criteria", [])
 
+            # ── Extract analyst agent outputs ──────────────────────────────────
+            analyst_thesis_entry = next((c for c in criteria if c.get("name") == "analyst_thesis"), None)
+            thesis, diligence_questions, agent_verdict = "", [], ""
+            if analyst_thesis_entry:
+                ev = analyst_thesis_entry.get("evidence", "")
+                # Parse: "THESIS: ... | DILIGENCE: q1 | q2 | q3 | VERDICT: ..."
+                if "THESIS:" in ev:
+                    thesis = ev.split("THESIS:")[1].split("|")[0].strip()
+                if "DILIGENCE:" in ev:
+                    dil_part = ev.split("DILIGENCE:")[1]
+                    if "VERDICT:" in dil_part:
+                        dil_part = dil_part.split("VERDICT:")[0]
+                    diligence_questions = [q.strip() for q in dil_part.split("|") if q.strip()]
+                if "VERDICT:" in ev:
+                    agent_verdict = ev.split("VERDICT:")[1].strip()
+
+            # ── Analyst verdict + thesis banner ────────────────────────────────
+            if thesis or agent_verdict:
+                verdict_color = {"RESEARCH NOW": "#059669", "WATCH": "#d97706", "PASS": "#6b7280"}.get(agent_verdict, "#6b7280")
+                verdict_bg    = {"RESEARCH NOW": "#f0fdf4", "WATCH": "#fffbeb", "PASS": "#f9fafb"}.get(agent_verdict, "#f9fafb")
+                st.markdown(
+                    f'<div style="background:{verdict_bg};border:1px solid {verdict_color}33;'
+                    f'border-radius:8px;padding:16px 20px;margin:16px 0 12px">'
+                    f'<div style="display:flex;align-items:center;gap:12px;margin-bottom:{"8px" if thesis else "0"}">'
+                    f'<span style="background:{verdict_color};color:#fff;padding:3px 10px;'
+                    f'border-radius:4px;font-size:0.72rem;font-weight:700;white-space:nowrap">'
+                    f'{agent_verdict or "SCORED"}</span>'
+                    f'<span style="font-size:0.76rem;font-weight:600;color:#6b7280;text-transform:uppercase;'
+                    f'letter-spacing:0.06em">AI Analyst Verdict</span></div>'
+                    + (f'<div style="font-size:0.88rem;color:#111827;font-style:italic;line-height:1.6">'
+                       f'"{thesis}"</div>' if thesis else "")
+                    + '</div>',
+                    unsafe_allow_html=True,
+                )
+
+            # ── Investment Memo ────────────────────────────────────────────────
             st.markdown(
                 '<div style="font-size:0.67rem;font-weight:600;text-transform:uppercase;'
                 'letter-spacing:0.08em;color:#9ca3af;margin:16px 0 8px">Investment Memo</div>',
@@ -397,46 +433,133 @@ def render() -> None:
                 st.markdown(
                     '<div style="background:#f9fafb;border:1px solid #e8eaed;border-radius:6px;'
                     'padding:16px 20px;font-size:0.84rem;color:#9ca3af">'
-                    'No memo generated — run screening again to generate comparison memos.</div>',
+                    'No memo generated — run screening again.</div>',
                     unsafe_allow_html=True,
                 )
 
-            # Scoring breakdown
-            criteria = sd.get("criteria", [])
+            # ── Diligence Questions ────────────────────────────────────────────
+            if diligence_questions:
+                st.markdown(
+                    '<div style="font-size:0.67rem;font-weight:600;text-transform:uppercase;'
+                    'letter-spacing:0.08em;color:#9ca3af;margin:16px 0 8px">Diligence Checklist</div>',
+                    unsafe_allow_html=True,
+                )
+                q_html = "".join(
+                    f'<div style="display:flex;align-items:flex-start;gap:10px;margin-bottom:8px">'
+                    f'<span style="color:#d97706;font-weight:700;margin-top:1px">?</span>'
+                    f'<span style="font-size:0.84rem;color:#374151;line-height:1.5">{q}</span></div>'
+                    for q in diligence_questions[:5]
+                )
+                st.markdown(
+                    f'<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:6px;'
+                    f'padding:14px 18px">{q_html}</div>',
+                    unsafe_allow_html=True,
+                )
+
+            # ── Scoring breakdown ──────────────────────────────────────────────
             if criteria:
                 with st.expander("Scoring breakdown"):
-                    cols = st.columns(2)
-                    fit_c  = [c for c in criteria if c.get("max_score", 0) > 0 and c.get("name") not in ("leverage","geographic_risk","earnings_quality")]
-                    risk_c = [c for c in criteria if c.get("name") in ("leverage","geographic_risk","earnings_quality","coverage_risk")]
-                    for i, c in enumerate(fit_c):
-                        mx = c.get("max_score", 1) or 1
-                        sc = c.get("score", 0)
-                        pct = min(100, int(sc / mx * 100))
-                        bar_c = "#059669" if pct >= 70 else ("#d97706" if pct >= 40 else "#dc2626")
-                        with cols[i % 2]:
-                            st.markdown(
-                                f'<div style="margin-bottom:10px">'
-                                f'<div style="display:flex;justify-content:space-between;'
-                                f'font-size:0.75rem;color:#374151;margin-bottom:3px">'
-                                f'<span>{c["name"].replace("_"," ").title()}</span>'
-                                f'<span style="font-weight:600">{sc:.0f}/{mx:.0f}</span></div>'
-                                f'<div style="background:#e8eaed;border-radius:2px;height:4px">'
-                                f'<div style="background:{bar_c};width:{pct}%;height:4px;border-radius:2px"></div>'
-                                f'</div>'
-                                f'<div style="font-size:0.7rem;color:#9ca3af;margin-top:2px">'
-                                f'{c.get("evidence","")}</div></div>',
-                                unsafe_allow_html=True,
-                            )
+                    # Agent dimension scores (max_score in 5-30 range, name in agent set)
+                    agent_dims = {"business_quality", "unit_economics", "capital_returns",
+                                  "growth_quality", "balance_sheet", "phoenician_fit"}
+                    agent_c = [c for c in criteria if c.get("name") in agent_dims and c.get("max_score", 0) > 0]
+                    python_c = [c for c in criteria if c.get("name") not in agent_dims
+                                and c.get("name") != "analyst_thesis"
+                                and c.get("max_score", 0) > 0]
 
-            # Actions
-            _REJECT_REASONS = [
+                    if agent_c:
+                        st.markdown(
+                            '<div style="font-size:0.68rem;font-weight:600;text-transform:uppercase;'
+                            'letter-spacing:0.07em;color:#6b7280;margin-bottom:8px">AI Analyst Scores</div>',
+                            unsafe_allow_html=True,
+                        )
+                        cols = st.columns(2)
+                        for i, c in enumerate(agent_c):
+                            mx = c.get("max_score", 1) or 1
+                            sc = c.get("score", 0)
+                            # Agent scores are already in pts (e.g. 30 max for business_quality)
+                            # Raw agent score was 0-100, stored as (raw/100)*max_pts
+                            raw_pct = min(100, int(sc / mx * 100))
+                            raw_score = int(sc / mx * 100)
+                            bar_c = "#059669" if raw_pct >= 65 else ("#d97706" if raw_pct >= 40 else "#dc2626")
+                            ev = c.get("evidence", "")
+                            # Strip "[Agent XX/100] " prefix
+                            if ev.startswith("[Agent"):
+                                ev = ev.split("] ", 1)[-1] if "] " in ev else ev
+                            with cols[i % 2]:
+                                st.markdown(
+                                    f'<div style="margin-bottom:12px">'
+                                    f'<div style="display:flex;justify-content:space-between;'
+                                    f'font-size:0.78rem;color:#111827;font-weight:600;margin-bottom:4px">'
+                                    f'<span>{c["name"].replace("_"," ").title()}</span>'
+                                    f'<span style="color:{bar_c}">{raw_score}/100</span></div>'
+                                    f'<div style="background:#e8eaed;border-radius:3px;height:5px;margin-bottom:5px">'
+                                    f'<div style="background:{bar_c};width:{raw_pct}%;height:5px;border-radius:3px"></div>'
+                                    f'</div>'
+                                    f'<div style="font-size:0.71rem;color:#6b7280;line-height:1.5">{ev[:200]}</div>'
+                                    f'</div>',
+                                    unsafe_allow_html=True,
+                                )
+
+                    if python_c:
+                        st.markdown(
+                            '<div style="font-size:0.68rem;font-weight:600;text-transform:uppercase;'
+                            'letter-spacing:0.07em;color:#6b7280;margin:12px 0 8px">Supplementary Signals</div>',
+                            unsafe_allow_html=True,
+                        )
+                        cols2 = st.columns(2)
+                        for i, c in enumerate(python_c):
+                            mx = c.get("max_score", 1) or 1
+                            sc = c.get("score", 0)
+                            pct = min(100, int(sc / mx * 100))
+                            bar_c = "#059669" if pct >= 70 else ("#d97706" if pct >= 40 else "#dc2626")
+                            with cols2[i % 2]:
+                                st.markdown(
+                                    f'<div style="margin-bottom:10px">'
+                                    f'<div style="display:flex;justify-content:space-between;'
+                                    f'font-size:0.74rem;color:#374151;margin-bottom:3px">'
+                                    f'<span>{c["name"].replace("_"," ").title()}</span>'
+                                    f'<span style="font-weight:600">{sc:.0f}/{mx:.0f}</span></div>'
+                                    f'<div style="background:#e8eaed;border-radius:2px;height:4px">'
+                                    f'<div style="background:{bar_c};width:{pct}%;height:4px;border-radius:2px"></div>'
+                                    f'</div>'
+                                    f'<div style="font-size:0.7rem;color:#9ca3af;margin-top:2px">'
+                                    f'{c.get("evidence","")[:150]}</div></div>',
+                                    unsafe_allow_html=True,
+                                )
+
+            # ── Analyst suggestion banner ──────────────────────────────────────
+            if agent_verdict:
+                suggestion_map = {
+                    "RESEARCH NOW": ("Analyst recommends investigating this company within 2 weeks", "#059669", "#f0fdf4"),
+                    "WATCH":        ("Analyst recommends monitoring — wait for better entry or more data", "#d97706", "#fffbeb"),
+                    "PASS":         ("Analyst recommends passing — does not meet Phoenician mandate", "#6b7280", "#f9fafb"),
+                }
+                msg, clr, bg = suggestion_map.get(agent_verdict, ("", "#6b7280", "#f9fafb"))
+                if msg:
+                    st.markdown(
+                        f'<div style="background:{bg};border:1px solid {clr}22;border-radius:6px;'
+                        f'padding:10px 14px;margin:12px 0 4px;font-size:0.8rem;color:{clr};font-weight:500">'
+                        f'AI Suggestion: {msg}</div>',
+                        unsafe_allow_html=True,
+                    )
+
+            # Actions — reject reasons enriched with agent diligence questions
+            _BASE_REJECT_REASONS = [
                 "Too expensive", "Weak moat / low quality", "Poor unit economics",
                 "No insider alignment", "Too well-covered", "Limited growth runway",
                 "Too risky", "Already known",
             ]
+            # Add agent diligence questions as specific reject reasons
+            _REJECT_REASONS = _BASE_REJECT_REASONS + [
+                f"Unresolved: {q[:60]}" for q in diligence_questions[:3]
+            ] if diligence_questions else _BASE_REJECT_REASONS
+
             ac1, ac2, ac3, _ = st.columns([1, 1, 1, 4])
             with ac1:
-                if st.button("Research Now", key=f"res_{ticker}", use_container_width=True):
+                # Highlight Research Now if agent verdict matches
+                btn_label = "✓ Research Now" if agent_verdict == "RESEARCH NOW" else "Research Now"
+                if st.button(btn_label, key=f"res_{ticker}", use_container_width=True):
                     rec_id = _run(_get_rec_id(ticker))
                     if rec_id:
                         _run(_submit_feedback((rec_id, ticker), "research_now"))

@@ -142,18 +142,28 @@ def _build_sector_context(sector_medians: dict | None) -> str:
 
 
 def _build_valuation_context(metrics: Metric) -> str:
-    """Build valuation multiples string."""
+    """Build valuation multiples string including P/E."""
     lines = []
     if metrics.ev_ebit:
-        lines.append(f"EV/EBIT:      {float(metrics.ev_ebit):.1f}x")
+        v = float(metrics.ev_ebit)
+        if 0 < v < 200:
+            lines.append(f"EV/EBIT:      {v:.1f}x")
     if metrics.ev_fcf:
-        lines.append(f"EV/FCF:       {float(metrics.ev_fcf):.1f}x")
+        v = float(metrics.ev_fcf)
+        if 0 < v < 300:
+            lines.append(f"EV/FCF:       {v:.1f}x")
+    if metrics.pe_ratio:
+        v = float(metrics.pe_ratio)
+        if 0 < v < 500:
+            lines.append(f"P/E Ratio:    {v:.1f}x")
     if metrics.fcf_yield:
         fy = float(metrics.fcf_yield)
-        if 0 < fy < 0.50:  # cap anomalies
+        if 0 < fy < 0.50:
             lines.append(f"FCF Yield:    {fy*100:.1f}%")
     if metrics.net_debt_ebitda:
         lines.append(f"ND/EBITDA:    {float(metrics.net_debt_ebitda):.1f}x")
+    if metrics.market_cap_usd:
+        lines.append(f"Market Cap:   {_usd(float(metrics.market_cap_usd))}")
     return "\n".join(lines) if lines else "Valuation data unavailable"
 
 
@@ -163,10 +173,14 @@ def _load_analyst_prompts(
     financial_history_str: str,
     portfolio_avg: dict | None = None,
     sector_medians: dict | None = None,
+    feedback_context: str | None = None,
 ) -> tuple[str, str]:
     """Load system and scoring prompts from Jinja2 templates."""
     from src.prompts.loader import load_prompt
-    system = load_prompt("scoring/analyst_system.j2")
+    system = load_prompt(
+        "scoring/analyst_system.j2",
+        feedback_context=feedback_context or "No analyst decisions recorded yet.",
+    )
     user   = load_prompt(
         "scoring/analyst_score.j2",
         name=company.name,
@@ -189,6 +203,7 @@ async def score_with_analyst_agent(
     historical: list[dict] | None = None,
     portfolio_avg: dict | None = None,
     sector_medians: dict | None = None,
+    feedback_context: str | None = None,
 ) -> list[CriterionScore]:
     """
     Use Claude as a financial analyst agent to score the company.
@@ -201,7 +216,7 @@ async def score_with_analyst_agent(
 
         fin_history = _build_financial_history(metrics, historical)
         system, prompt = _load_analyst_prompts(
-            company, metrics, fin_history, portfolio_avg, sector_medians
+            company, metrics, fin_history, portfolio_avg, sector_medians, feedback_context
         )
 
         response = await complete_with_search(

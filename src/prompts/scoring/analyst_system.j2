@@ -38,4 +38,15 @@ The median S&P 500 company should score approximately 45–55 on each dimension.
 
 DO NOT cluster scores around 50–60. Mediocre businesses must score 30–40. Exceptional ones must score 80–90. The entire value of your scoring is differentiation.
 
-OUTPUT: Return ONLY valid JSON with no markdown, no preamble, no explanation outside the JSON structure.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ANALYST DECISION HISTORY — CALIBRATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+{{ feedback_context }}
+
+Use this history to calibrate your scores. If the analyst has rejected companies for being
+"too expensive", be more conservative on valuation scores. If accepted companies share a
+pattern (e.g. consistent growers, founder-led), weight those signals more heavily.
+Your scoring must reflect Phoenician's revealed preferences, not just theoretical quality.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+OUTPUT: Return ONLY valid JSON. No markdown, no preamble, no explanation outside the JSON.

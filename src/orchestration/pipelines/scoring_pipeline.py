@@ -35,6 +35,51 @@ from src.shared.types import ScoringResult
 logger = logging.getLogger(__name__)
 
 
+def _build_feedback_context(recent_feedback) -> str:
+    """Build analyst decision history string for the agent's learning."""
+    if not recent_feedback:
+        return "No analyst decisions recorded yet — this is an early run."
+
+    accepted  = [f for f in recent_feedback if f.action == "research_now"]
+    watched   = [f for f in recent_feedback if f.action == "watch"]
+    rejected  = [f for f in recent_feedback if f.action == "reject"]
+
+    lines = [f"Recent analyst decisions ({len(recent_feedback)} total, last 60 days):"]
+    lines.append(f"  Research Now: {len(accepted)} | Watch: {len(watched)} | Pass: {len(rejected)}")
+
+    if accepted:
+        lines.append(f"  Companies selected for research: {', '.join(f.ticker for f in accepted[:10])}")
+
+    if rejected:
+        # Summarise reject reasons
+        reasons: dict[str, int] = {}
+        for f in rejected:
+            r = f.reject_reason or "unspecified"
+            reasons[r] = reasons.get(r, 0) + 1
+        top_reasons = sorted(reasons.items(), key=lambda x: -x[1])[:5]
+        lines.append("  Top reject reasons: " + "; ".join(f"{r} ({n}x)" for r, n in top_reasons))
+        lines.append(f"  Recently passed: {', '.join(f.ticker for f in rejected[:8])}")
+
+    lines.append("Use this to calibrate your scoring — reflect what Phoenician has revealed it values.")
+    return "\n".join(lines)
+
+
+# Hardcoded sector median fallbacks when DB has insufficient data
+_SECTOR_MEDIANS_FALLBACK: dict[str, dict] = {
+    "Technology":            {"median_gross_margin": 0.62, "median_roic": 0.14, "median_ev_ebit": 22.0},
+    "Information Technology":{"median_gross_margin": 0.58, "median_roic": 0.16, "median_ev_ebit": 20.0},
+    "Healthcare":            {"median_gross_margin": 0.55, "median_roic": 0.10, "median_ev_ebit": 18.0},
+    "Health Care":           {"median_gross_margin": 0.55, "median_roic": 0.10, "median_ev_ebit": 18.0},
+    "Consumer Defensive":    {"median_gross_margin": 0.35, "median_roic": 0.12, "median_ev_ebit": 16.0},
+    "Consumer Staples":      {"median_gross_margin": 0.32, "median_roic": 0.11, "median_ev_ebit": 15.0},
+    "Consumer Discretionary":{"median_gross_margin": 0.38, "median_roic": 0.10, "median_ev_ebit": 14.0},
+    "Consumer Cyclical":     {"median_gross_margin": 0.38, "median_roic": 0.10, "median_ev_ebit": 14.0},
+    "Industrials":           {"median_gross_margin": 0.28, "median_roic": 0.10, "median_ev_ebit": 14.0},
+    "Communication Services":{"median_gross_margin": 0.50, "median_roic": 0.09, "median_ev_ebit": 16.0},
+    "Materials":             {"median_gross_margin": 0.25, "median_roic": 0.09, "median_ev_ebit": 12.0},
+}
+
+
 class ScoringPipeline:
     """End-to-end scoring pipeline for the full company universe."""
 
@@ -91,6 +136,11 @@ class ScoringPipeline:
         # Load portfolio context once for all comparisons
         portfolio_avg = await self.portfolio_repo.get_avg_metrics()
         logger.info("Portfolio context: %d holdings loaded", portfolio_avg.get("holding_count", 0))
+
+        # Load recent analyst decisions for feedback learning (last 60 days)
+        recent_feedback = await self.feedback_repo.get_recent_feedback(days=60)
+        feedback_context = _build_feedback_context(recent_feedback)
+        logger.info("Feedback context: %d recent decisions loaded", len(recent_feedback))
 
         results: list[ScoringResult] = []
         passed_filter = 0
@@ -175,11 +225,17 @@ class ScoringPipeline:
                 except Exception:
                     pass  # historical stays None — agent uses current year only
 
+                # Enrich sector medians with fallback when DB has insufficient data
+                enriched_sector_medians = dict(sector_medians) if sector_medians else {}
+                if company.gics_sector and not enriched_sector_medians.get("median_gross_margin"):
+                    fallback = _SECTOR_MEDIANS_FALLBACK.get(company.gics_sector, {})
+                    enriched_sector_medians.update(fallback)
+
                 # 8. Fit score (AI analyst agent + supplementary Python signals)
                 fit_score, fit_criteria = self.fit_scorer.score(
                     company=company,
                     metrics=metrics,
-                    sector_medians=sector_medians,
+                    sector_medians=enriched_sector_medians,
                     claims=None,
                     cluster_purchases=cluster_purchases,
                     current_price=float(metrics.market_cap_usd / metrics.shares_outstanding)
@@ -188,6 +244,7 @@ class ScoringPipeline:
                     transcript_signals=transcript_signals,
                     historical=historical,
                     portfolio_avg=portfolio_avg,
+                    feedback_context=feedback_context,
                 )
 
                 # 8. Risk score
