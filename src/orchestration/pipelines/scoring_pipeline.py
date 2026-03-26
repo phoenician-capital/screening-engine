@@ -144,7 +144,7 @@ class ScoringPipeline:
 
         results: list[ScoringResult] = []
         passed_filter = 0
-        sem = asyncio.Semaphore(10)  # score up to 10 companies concurrently
+        sem = asyncio.Semaphore(20)  # 20 concurrent — agent calls are async, no blocking
 
         async def _score_one(company) -> None:
             async with sem:
@@ -231,8 +231,8 @@ class ScoringPipeline:
                     fallback = _SECTOR_MEDIANS_FALLBACK.get(company.gics_sector, {})
                     enriched_sector_medians.update(fallback)
 
-                # 8. Fit score (AI analyst agent + supplementary Python signals)
-                fit_score, fit_criteria = self.fit_scorer.score(
+                # 8. Fit score (AI analyst agent — fully async, parallel)
+                fit_score, fit_criteria = await self.fit_scorer.score(
                     company=company,
                     metrics=metrics,
                     sector_medians=enriched_sector_medians,

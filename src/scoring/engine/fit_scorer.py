@@ -63,7 +63,7 @@ def _is_criteria_missing_data(criterion: CriterionScore) -> bool:
 class FitScorer:
     """Compute Phoenician Fit Score using AI Financial Analyst Agent + Python supplementary signals."""
 
-    def score(
+    async def score(
         self,
         company: Company,
         metrics: Metric,
@@ -77,29 +77,16 @@ class FitScorer:
         portfolio_avg: dict | None = None,
         feedback_context: str | None = None,
     ) -> tuple[float, list[CriterionScore]]:
-        import asyncio as _asyncio
         from src.scoring.engine.analyst_agent import score_with_analyst_agent
 
         all_criteria: list[CriterionScore] = []
 
         # ── STEP 1: AI Financial Analyst Agent (primary scoring) ──────────────
-        # Agent reads 5yr history, assesses quality/consistency/trends
-        # Returns 6 dimension scores with evidence
+        # Called directly as async — parallelism handled by asyncio.gather in pipeline
         try:
-            loop = _asyncio.get_event_loop()
-            if loop.is_running():
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
-                    agent_future = ex.submit(
-                        lambda: _asyncio.run(
-                            score_with_analyst_agent(company, metrics, historical, portfolio_avg, sector_medians, feedback_context)
-                        )
-                    )
-                    agent_criteria = agent_future.result(timeout=60)
-            else:
-                agent_criteria = loop.run_until_complete(
-                    score_with_analyst_agent(company, metrics, historical, portfolio_avg, sector_medians, feedback_context)
-                )
+            agent_criteria = await score_with_analyst_agent(
+                company, metrics, historical, portfolio_avg, sector_medians, feedback_context
+            )
         except Exception as e:
             logger.warning("Agent scoring failed for %s: %s", company.ticker, e)
             agent_criteria = []
