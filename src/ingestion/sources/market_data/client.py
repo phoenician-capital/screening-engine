@@ -463,11 +463,115 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
     return result
 
 
+async def _fetch_yahoo_timeseries(ticker: str) -> dict[str, Any]:
+    """
+    Fetch annual fundamentals from Yahoo Finance timeseries endpoint.
+    Works for international tickers (Swedish, Polish, Australian, Canadian, etc.)
+    No authentication required — free and reliable from server IPs.
+    Data is in local currency — margins and ratios are currency-neutral.
+    """
+    cache_key = f"yts:{ticker}"
+    cached = _cache_get(cache_key)
+    if cached:
+        return cached
+
+    BASE  = "https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries"
+    TYPES = "annualTotalRevenue,annualGrossProfit,annualNetIncome,annualOperatingIncome,annualFreeCashFlow,annualCapitalExpenditure"
+    P1, P2 = "1577836800", "1735689600"  # 2020-01-01 to 2025-01-01
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0",
+        "Accept": "application/json",
+    }
+
+    try:
+        async with httpx.AsyncClient(headers=headers, timeout=10) as client:
+            r = await client.get(BASE + "/" + ticker,
+                                 params={"type": TYPES, "period1": P1, "period2": P2})
+            if r.status_code != 200:
+                return {}
+
+            results = r.json().get("timeseries", {}).get("result", [])
+            data: dict[str, float | None] = {}
+            for item in results:
+                key  = (item.get("meta", {}).get("type") or [""])[0]
+                vals = [v for v in item.get(key, []) if v]
+                if vals:
+                    data[key] = vals[-1].get("reportedValue", {}).get("raw")
+
+            revenue      = data.get("annualTotalRevenue")
+            gross_profit = data.get("annualGrossProfit")
+            net_income   = data.get("annualNetIncome")
+            ebit         = data.get("annualOperatingIncome")
+            fcf          = data.get("annualFreeCashFlow")
+            capex        = data.get("annualCapitalExpenditure")
+
+            if not revenue:
+                return {}
+
+            # Compute prior year for growth (fetch previous period)
+            rev_yoy = None
+            try:
+                r2 = await client.get(BASE + "/" + ticker,
+                    params={"type": "annualTotalRevenue", "period1": "1514764800", "period2": "1609459200"})
+                if r2.status_code == 200:
+                    res2 = r2.json().get("timeseries", {}).get("result", [{}])[0]
+                    prior_vals = [v for v in res2.get("annualTotalRevenue", []) if v]
+                    if prior_vals and revenue:
+                        prior_rev = prior_vals[-1].get("reportedValue", {}).get("raw")
+                        if prior_rev and prior_rev > 0:
+                            rev_yoy = (revenue - prior_rev) / prior_rev
+            except Exception:
+                pass
+
+            # Market cap from v8 chart (price only — no shares)
+            mc = None
+            try:
+                rc = await client.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}",
+                                      params={"range": "1d", "interval": "1d"}, timeout=5)
+                if rc.status_code == 200:
+                    meta = rc.json().get("chart", {}).get("result", [{}])[0].get("meta", {})
+                    mc = meta.get("marketCap")
+            except Exception:
+                pass
+
+            result = {
+                "revenue":        revenue,
+                "gross_profit":   gross_profit,
+                "ebit":           ebit,
+                "net_income":     net_income,
+                "fcf":            fcf,
+                "capex":          abs(capex) if capex else None,
+                "revenue_growth": rev_yoy,
+                "market_cap_fmp": mc,
+                "roic":           None,
+                "roe":            None,
+                "net_debt_ebitda_direct": None,
+                "ev_ebitda_direct":       None,
+                "fcf_yield_direct":       None,
+                "capex_rev_direct":       None,
+                "is_founder_led":         None,
+                "insider_ownership_pct":  None,
+                "ceo_name":               "",
+                "stock_repurchased":      None,
+                "stock_based_compensation": None,
+                "acquisitions_net":       None,
+            }
+            logger.info("Yahoo timeseries for %s: rev=$%.0fM gm=%.1f%%",
+                        ticker,
+                        (revenue or 0) / 1e6,
+                        ((gross_profit / revenue * 100) if gross_profit and revenue else 0))
+            _cache_set(cache_key, result, ttl=86400)
+            return result
+
+    except Exception as e:
+        logger.warning("Yahoo timeseries failed for %s: %s", ticker, e)
+        return {}
+
+
 async def _fetch_llm_financials(ticker: str, company_name: str, country: str) -> dict[str, Any]:
     """
-    Use Claude web search to fetch financial data for international companies
-    that don't have SEC EDGAR filings.
-    Returns a dict compatible with _compute_metrics() expectations.
+    Last-resort LLM fallback — only used when both FMP and Yahoo timeseries fail.
     """
     import json as _json
     try:
@@ -487,7 +591,6 @@ async def _fetch_llm_financials(ticker: str, company_name: str, country: str) ->
         )
 
         text = response.strip()
-        # Strip markdown fences
         if "```" in text:
             parts = text.split("```")
             for part in parts:
@@ -984,8 +1087,14 @@ async def screen_universe_global(
                     if fmp_fin and not fmp_fin.get("excluded") and fmp_fin.get("revenue"):
                         fin = fmp_fin
                     elif co.get("is_intl"):
-                        async with llm_sem:
-                            fin = await _fetch_llm_financials(ticker, co["name"], co.get("country",""))
+                        # Yahoo timeseries — free, no auth, works globally
+                        yts_fin = await _fetch_yahoo_timeseries(ticker)
+                        if yts_fin and yts_fin.get("revenue"):
+                            fin = yts_fin
+                        else:
+                            # Last resort: LLM fallback
+                            async with llm_sem:
+                                fin = await _fetch_llm_financials(ticker, co["name"], co.get("country",""))
 
                     if not fin or fin.get("excluded"):
                         return
@@ -1165,9 +1274,14 @@ async def screen_universe_global(
                     if fmp_fin and not fmp_fin.get("excluded") and fmp_fin.get("revenue"):
                         fin = fmp_fin
                     else:
-                        # LLM fallback for tickers FMP doesn't cover
-                        async with llm_sem:
-                            fin = await _fetch_llm_financials(ticker, co["name"], country)
+                        # Yahoo timeseries — free, global, no auth required
+                        yts_fin = await _fetch_yahoo_timeseries(ticker)
+                        if yts_fin and yts_fin.get("revenue"):
+                            fin = yts_fin
+                        else:
+                            # Last resort: LLM
+                            async with llm_sem:
+                                fin = await _fetch_llm_financials(ticker, co["name"], country)
 
                     # Use FMP/LLM market cap if available
                     real_mc = fin.get("market_cap_fmp") or fin.get("market_cap_usd")
