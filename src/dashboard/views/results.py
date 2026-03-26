@@ -34,7 +34,7 @@ def _engine_factory():
     return engine, factory
 
 
-async def _load_results(limit: int = 100) -> list[dict]:
+async def _load_results(limit: int = 500) -> list[dict]:
     from src.db.repositories.recommendation_repo import RecommendationRepository
     from src.db.repositories.company_repo import CompanyRepository
     from src.db.repositories.metric_repo import MetricRepository
@@ -44,7 +44,7 @@ async def _load_results(limit: int = 100) -> list[dict]:
             rec_repo = RecommendationRepository(session)
             co_repo  = CompanyRepository(session)
             met_repo = MetricRepository(session)
-            recs     = await rec_repo.get_top_ranked(limit=limit)
+            recs     = await rec_repo.get_top_ranked(limit=limit)  # load all
             rows = []
             for r in recs:
                 co  = await co_repo.get_by_ticker(r.ticker)
@@ -174,23 +174,27 @@ def render() -> None:
     </div>
     """, unsafe_allow_html=True)
 
+    # ── Load ALL results first ─────────────────────────────────────────────────
+    rows = _run(_load_results(limit=500))
+
     # ── Filter / controls bar ─────────────────────────────────────────────────
-    fc1, fc2, fc3, fc4, fc5 = st.columns([2, 1, 1, 1, 1])
+    fc1, fc2, fc3, fc4, fc5, fc6 = st.columns([2, 1, 1, 1, 1, 1])
     with fc1:
         search = st.text_input("Search", placeholder="Ticker or company name…", label_visibility="collapsed")
     with fc2:
-        min_fit = st.selectbox("Min Fit", ["Any fit", "40+", "50+", "60+", "70+"], label_visibility="collapsed")
+        min_fit = st.selectbox("Min Fit", ["Any fit", "30+", "40+", "50+", "60+", "70+"], label_visibility="collapsed")
     with fc3:
-        max_risk = st.selectbox("Max Risk", ["Any risk", "< 25", "< 40", "< 55"], label_visibility="collapsed")
+        max_risk = st.selectbox("Max Risk", ["Any risk", "< 15", "< 25", "< 40", "< 55"], label_visibility="collapsed")
     with fc4:
         status_f = st.selectbox("Status", ["All", "Pending", "Researching", "Watched", "Rejected"], label_visibility="collapsed")
     with fc5:
-        show_n = st.selectbox("Show", [10, 25, 50, 100], index=1, label_visibility="collapsed")
+        # Build sector list from loaded data
+        sectors = sorted(set(r.get("sector","") for r in rows if r.get("sector")))
+        sector_f = st.selectbox("Sector", ["All sectors"] + sectors, label_visibility="collapsed")
+    with fc6:
+        sort_by = st.selectbox("Sort", ["Score", "Fit", "Risk ↑", "Market Cap"], label_visibility="collapsed")
 
     st.markdown('<div style="height:4px"></div>', unsafe_allow_html=True)
-
-    # ── Load ──────────────────────────────────────────────────────────────────
-    rows = _run(_load_results(limit=show_n))
 
     if not rows:
         st.markdown("""
@@ -205,8 +209,8 @@ def render() -> None:
         return
 
     # ── Apply filters ─────────────────────────────────────────────────────────
-    min_fit_val  = {"Any fit": 0,  "40+": 40, "50+": 50, "60+": 60, "70+": 70}.get(min_fit, 0)
-    max_risk_val = {"Any risk": 100, "< 25": 25, "< 40": 40, "< 55": 55}.get(max_risk, 100)
+    min_fit_val  = {"Any fit": 0, "30+": 30, "40+": 40, "50+": 50, "60+": 60, "70+": 70}.get(min_fit, 0)
+    max_risk_val = {"Any risk": 100, "< 15": 15, "< 25": 25, "< 40": 40, "< 55": 55}.get(max_risk, 100)
 
     if search:
         s = search.upper()
@@ -217,12 +221,25 @@ def render() -> None:
         rows = [r for r in rows if r["risk_score"] < max_risk_val]
     if status_f != "All":
         rows = [r for r in rows if r["status"] == status_f.lower()]
+    if sector_f != "All sectors":
+        rows = [r for r in rows if r.get("sector","") == sector_f]
+
+    # ── Sort ──────────────────────────────────────────────────────────────────
+    if sort_by == "Fit":
+        rows.sort(key=lambda r: r["fit_score"], reverse=True)
+    elif sort_by == "Risk ↑":
+        rows.sort(key=lambda r: r["risk_score"])
+    elif sort_by == "Market Cap":
+        rows.sort(key=lambda r: r.get("market_cap") or 0, reverse=True)
+    else:
+        rows.sort(key=lambda r: r["rank_score"], reverse=True)
 
     if not rows:
         st.info("No companies match the current filters.")
         return
 
     # ── Count line ─────────────────────────────────────────────────────────────
+    # rows is already the full loaded set (before filters applied to display)
     st.markdown(
         f'<div style="font-size:0.76rem;color:#9ca3af;margin-bottom:10px">'
         f'{len(rows)} companies</div>',

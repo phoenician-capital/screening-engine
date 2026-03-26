@@ -96,9 +96,9 @@ class UniverseExpander:
             response = await complete_with_search(
                 prompt=prompt,
                 model=settings.llm.primary_model,
-                max_tokens=2000,
+                max_tokens=8000,   # enough for 500 tickers in JSON
                 temperature=0.1,
-                max_searches=1,  # minimal — we provide the list, no search needed
+                max_searches=1,
             )
             # Parse JSON array from response
             text = response.strip()
@@ -107,13 +107,16 @@ class UniverseExpander:
             if start != -1 and end != -1:
                 tickers = _json.loads(text[start:end+1])
                 tickers = [t.strip().upper() for t in tickers if isinstance(t, str)]
-                logger.info("Claude pre-screen returned %d tickers", len(tickers))
-                return tickers[:target]
+                logger.info("Claude pre-screen returned %d tickers (no cap applied)", len(tickers))
+                # No artificial cap — Claude decides how many to select
+                return tickers
         except Exception as e:
             logger.warning("Claude pre-screen failed: %s — falling back to random sample", e)
 
-        # Fallback: random sample
-        return [c["ticker"] for c in all_candidates[:target]]
+        # Fallback: broad random sample
+        import random as _fallback_rng
+        _fallback_rng.shuffle(all_candidates)
+        return [c["ticker"] for c in all_candidates[:min(400, len(all_candidates))]]
 
     # ── Primary method: full EDGAR universe build ─────────────────────────────
 
@@ -155,11 +158,12 @@ class UniverseExpander:
         logger.info("Raw candidates: %d US + %d intl = %d total",
                     len(us_raw), len(intl_raw), len(us_raw) + len(intl_raw))
 
-        # Step 3: Claude pre-screens to best 100 based on mandate + portfolio
+        # Step 3: Claude pre-screens the full universe — no artificial cap
+        # Claude decides how many to select (target: 300-500)
         preselected = await self._claude_prescreen(
             us_candidates=us_raw,
             intl_candidates=intl_raw,
-            target=max(100, max_companies * 4),
+            target=500,   # upper safety limit only — Claude picks freely
             existing_tickers=existing_tickers,
         )
         logger.info("Claude pre-selected %d candidates for financial ingestion", len(preselected))
