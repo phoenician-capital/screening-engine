@@ -247,10 +247,18 @@ class ScoringPipeline:
                     feedback_context=feedback_context,
                 )
 
-                # 8. Risk score
-                risk_score, risk_criteria = self.risk_scorer.score(
-                    metrics=metrics, claims=None, country=company.country,
+                # 8. Risk score — use LLM risk score if agent ran, else Python
+                llm_risk = next(
+                    (c for c in fit_criteria if c.name == "llm_risk_score"), None
                 )
+                if llm_risk is not None and llm_risk.score > 0:
+                    risk_score = min(100.0, max(0.0, llm_risk.score))
+                    risk_criteria = [llm_risk]
+                    logger.info("Risk score for %s: %.1f/100 (LLM)", company.ticker, risk_score)
+                else:
+                    risk_score, risk_criteria = self.risk_scorer.score(
+                        metrics=metrics, claims=None, country=company.country,
+                    )
 
                 # 9. Rank score
                 feedback_stats = await self.feedback_repo.count_by_action(company.ticker)

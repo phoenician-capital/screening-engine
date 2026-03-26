@@ -227,56 +227,90 @@ async def score_with_analyst_agent(
             temperature=0.1,
         )
 
-        # Parse JSON
+        # Parse JSON — handle extra text before/after JSON block
         text = response.strip()
-        start, end = text.find("{"), text.rfind("}")
-        if start == -1 or end == -1:
-            raise ValueError("No JSON in response")
-        data = json.loads(text[start:end+1])
+        # Try direct parse first
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            # Extract JSON block between first { and matching }
+            start = text.find("{")
+            if start == -1:
+                raise ValueError("No JSON found in agent response")
+            # Find the matching closing brace by counting depth
+            depth = 0
+            end = -1
+            for i, ch in enumerate(text[start:], start):
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        end = i
+                        break
+            if end == -1:
+                raise ValueError("Unmatched braces in agent response")
+            data = json.loads(text[start:end+1])
 
-        # Convert to CriterionScore list
+        # ── Extract LLM scores — agent has full freedom ──────────────────────
         criteria = []
-        dimension_map = {
-            "business_quality":  ("Business Quality",  30.0),
-            "unit_economics":    ("Unit Economics",     25.0),
-            "capital_returns":   ("Capital Returns",    20.0),
-            "growth_quality":    ("Growth Quality",     15.0),
-            "balance_sheet":     ("Balance Sheet",       5.0),
-            "phoenician_fit":    ("Phoenician Fit",      5.0),
-        }
 
-        total_weight = 100.0
+        # Per-dimension scores for UI breakdown display
+        dimension_map = {
+            "business_quality": ("Business Quality",  30.0),
+            "unit_economics":   ("Unit Economics",    25.0),
+            "capital_returns":  ("Capital Returns",   20.0),
+            "growth_quality":   ("Growth Quality",    15.0),
+            "balance_sheet":    ("Balance Sheet",      5.0),
+            "phoenician_fit":   ("Phoenician Fit",     5.0),
+        }
         for key, (name, weight) in dimension_map.items():
             if key not in data:
                 continue
-            raw_score  = float(data[key]["score"])
-            evidence   = data[key].get("evidence", "")
-            # Scale: agent returns 0-100, we scale to weight-proportional pts
-            # e.g. business_quality weight=30 → max_pts=30, score=(raw/100)*30
-            max_pts    = weight
-            pts        = (raw_score / 100.0) * max_pts
+            raw   = float(data[key]["score"])
+            ev    = data[key].get("evidence", "")
+            pts   = (raw / 100.0) * weight
             criteria.append(CriterionScore(
-                name=key, score=pts, max_score=max_pts,
-                weight=1.0, evidence=f"[Agent {raw_score}/100] {evidence}"
+                name=key, score=pts, max_score=weight,
+                weight=1.0, evidence=f"[Agent {raw:.0f}/100] {ev}"
             ))
 
-        # Log verdict + thesis
+        # ── Overall fit score — LLM's holistic judgment (0-100) ──────────────
+        # This is the primary score used for ranking — NOT a weighted average
+        overall_fit = float(data.get("overall_fit_score", 0))
+        criteria.append(CriterionScore(
+            name="overall_fit",
+            score=overall_fit,
+            max_score=100.0,
+            weight=1.0,
+            evidence=f"LLM overall fit score: {overall_fit:.0f}/100",
+        ))
+
+        # ── Risk score — LLM assesses risk directly (0-100) ──────────────────
+        risk_score = float(data.get("risk_score", 10))
+        risk_ev    = data.get("risk_evidence", "")
+        criteria.append(CriterionScore(
+            name="llm_risk_score",
+            score=risk_score,
+            max_score=100.0,
+            weight=1.0,
+            evidence=f"[Risk {risk_score:.0f}/100] {risk_ev}",
+        ))
+
+        # ── Thesis, diligence, verdict — display only ─────────────────────────
         verdict   = data.get("analyst_verdict", "")
         note      = data.get("analyst_note", "")
         thesis    = data.get("investment_thesis", "")
         questions = data.get("diligence_questions", [])
-        logger.info("Analyst agent for %s: verdict=%s | %s", company.ticker, verdict, note[:100])
+        logger.info("Analyst agent for %s: fit=%d risk=%d verdict=%s | %s",
+                    company.ticker, overall_fit, risk_score, verdict, note[:100])
 
-        # Store thesis + diligence questions as a special criterion for display in memo
-        if thesis or questions:
-            q_text = " | ".join(questions[:3]) if questions else ""
-            criteria.append(CriterionScore(
-                name="analyst_thesis",
-                score=0.0,
-                max_score=0.0,  # excluded from scoring — display only
-                weight=0.0,
-                evidence=f"THESIS: {thesis} | DILIGENCE: {q_text} | VERDICT: {verdict}",
-            ))
+        q_text = " | ".join(questions[:3]) if questions else ""
+        criteria.append(CriterionScore(
+            name="analyst_thesis",
+            score=0.0, max_score=0.0, weight=0.0,
+            evidence=f"THESIS: {thesis} | DILIGENCE: {q_text} | VERDICT: {verdict}",
+        ))
 
         return criteria
 

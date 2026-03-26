@@ -21,16 +21,15 @@ _GLOBAL_JOB: dict = {}
 _GLOBAL_JOB_LOCK = threading.Lock()
 
 
-def _run(coro, timeout: int = 1800):
-    """Run a coroutine in a completely isolated thread with its own event loop."""
+def _run(coro, timeout: int = None):
+    """Run a coroutine in a completely isolated thread with its own event loop.
+    No timeout — runs until completion regardless of duration."""
     import threading
     result_holder = [None]
     error_holder  = [None]
     done_event    = threading.Event()
 
     def _target():
-        # Dedicated executor lives for the ENTIRE run including DB writes after LLM calls
-        # Must not be shut down until after loop.close()
         executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=16, thread_name_prefix="screening_io"
         )
@@ -50,15 +49,13 @@ def _run(coro, timeout: int = 1800):
                     loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
                 loop.close()
             finally:
-                # Shut down executor only after loop is fully closed
                 executor.shutdown(wait=True, cancel_futures=True)
             done_event.set()
 
     t = threading.Thread(target=_target, daemon=True)
     t.start()
-    finished = done_event.wait(timeout=timeout)
-    if not finished:
-        raise RuntimeError(f"Operation timed out after {timeout}s")
+    # No timeout — wait forever until the run completes
+    done_event.wait()
     if error_holder[0]:
         raise error_holder[0]
     return result_holder[0]

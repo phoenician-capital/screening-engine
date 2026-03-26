@@ -1,24 +1,17 @@
-Conduct a full investment quality assessment for the following company on behalf of Phoenician Capital.
-
-You have access to web search — use it to:
-1. Understand what the business actually does, its competitive position, and business model (1 search)
-2. Find any recent material developments: earnings commentary, strategic announcements, competitive threats (1 search)
-
-Ground your scores in both the financial data provided AND what you find through research.
-Every score must be justified with specific numbers and specific qualitative observations.
+Conduct a full investment assessment for the following company. Use web search to understand the business and find recent developments. Then score it on every dimension with complete analytical freedom.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-COMPANY PROFILE
+COMPANY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Name:         {{ name }}
-Ticker:       {{ ticker }}
-Geography:    {{ country }}
-Sector:       {{ sector }}
-Market Cap:   {{ market_cap }}
-Description:  {{ description }}
+Name:        {{ name }}
+Ticker:      {{ ticker }}
+Country:     {{ country }}
+Sector:      {{ sector }}
+Market Cap:  {{ market_cap }}
+Description: {{ description }}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-FINANCIAL HISTORY (5-YEAR)
+5-YEAR FINANCIAL HISTORY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {{ financial_history }}
 
@@ -33,196 +26,82 @@ SECTOR PEER CONTEXT
 {{ sector_context }}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-PHOENICIAN CAPITAL PORTFOLIO CONTEXT
+PHOENICIAN PORTFOLIO CONTEXT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {{ portfolio_context }}
 
-Use this to assess: does this company add diversification or concentration?
-Is it a higher/lower quality version of something we already own?
-Does it complement the existing portfolio or overlap with it?
-
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-SCORING FRAMEWORK — 6 DIMENSIONS
+YOUR ASSESSMENT
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Score each dimension 0–100. Use the full range. Be differentiated.
-Reference specific numbers in every evidence field.
-If data is missing, score 0 and state explicitly what is missing.
+Use your 2 web searches wisely:
+- Search 1: understand the actual business model, competitive position, and moat
+- Search 2: recent developments — earnings commentary, management changes, competitive threats
 
-─────────────────────────────────────────
-DIMENSION 1: BUSINESS QUALITY (0–100)
-─────────────────────────────────────────
-Assess the structural quality of the business model. Use your web search findings here.
+Then score each dimension 0–100 with full analytical freedom. No thresholds, no rules — use judgment.
 
-→ What is the actual competitive moat? (brand, switching costs, network effects, IP, regulatory, scale)
-→ Gross margin: absolute level vs sector norms, and multi-year trend (expanding/stable/contracting)
-→ Operating leverage: does revenue growth drop through to EBIT disproportionately?
-→ Revenue growth: multi-year CAGR, not just YoY — is growth consistent or lumpy?
-→ NI growing faster than revenue = margin expansion = pricing power evidence
-→ What does your research reveal about competitive dynamics and moat durability?
+DIMENSION 1 — BUSINESS QUALITY
+Assess: competitive moat from your research, gross margin level and multi-year trend, operating leverage, pricing power evidence, revenue growth consistency vs. volatility, NI growing faster than revenue (margin expansion). What makes this business defensible or not?
 
-Calibration:
-  91–100  Rare — GM 70%+, 20%+ CAGR, clear margin expansion, verified durable moat
-  76–90   Excellent — GM 50–70%, 12–20% CAGR, stable/expanding margins, identifiable moat
-  61–75   Good — GM 30–50%, 8–12% CAGR, broadly stable, some competitive advantage
-  41–60   Average — GM 20–30%, 3–8% growth, mixed margin trend, limited differentiation
-  21–40   Below average — GM < 20%, slow/declining growth, or margin contraction
-  0–20    Structurally challenged — negative margins, declining revenue, commoditised
+DIMENSION 2 — UNIT ECONOMICS
+Assess: FCF/Net Income ratio (is NI real cash?), FCF yield, capex intensity, whether FCF is growing faster than revenue, working capital dynamics. Is this asset-light or capital-hungry?
 
-─────────────────────────────────────────
-DIMENSION 2: UNIT ECONOMICS & CASH GENERATION (0–100)
-─────────────────────────────────────────
-Assess whether reported earnings are backed by real cash. This is the quality check.
+DIMENSION 3 — CAPITAL RETURNS
+Assess: ROIC level and multi-year trend. Is the company earning above its cost of capital? Is the moat widening (rising ROIC) or eroding (falling ROIC)? ROE cross-check — if ROE >> ROIC, leverage is masking weak economics.
 
-→ FCF/Net Income ratio — the single most important check (< 0.7x raises serious concerns)
-→ FCF yield — free cash flow as % of market cap
-→ Capex/Revenue — < 5% asset-light; 5–10% moderate; > 15% capital-intensive
-→ Is FCF growing faster than revenue? (operating leverage flowing to cash)
-→ Any divergence between operating cash flow and net income?
+DIMENSION 4 — GROWTH QUALITY
+MOST IMPORTANT dimension. A consistent 15% grower for 5 years >> a 30% one-year spike followed by decline. Assess: revenue CAGR over full period, NI CAGR vs revenue CAGR (margin expansion?), year-to-year consistency (low variance = high quality), trajectory (accelerating or decelerating), any down years (big penalty). Is this growth organic or acquisition-driven?
 
-Calibration:
-  91–100  FCF/NI > 1.1x, FCF yield > 7%, capex/rev < 5%, FCF growing faster than revenue
-  76–90   FCF/NI > 0.9x, FCF yield > 5%, low capex, clean cash conversion
-  61–75   FCF/NI > 0.75x, FCF yield > 3%, manageable capex
-  41–60   FCF/NI 0.5–0.75x, FCF yield 1–3%, moderate capex
-  21–40   FCF below NI, high capex, or FCF yield < 1%
-  0–20    Negative FCF, FCF/NI < 0.5x, or data entirely missing
+DIMENSION 5 — BALANCE SHEET
+Assess: net cash vs. net debt position, ND/EBITDA, interest coverage, financial flexibility to invest counter-cyclically or buy back shares. Is leverage increasing or decreasing?
 
-─────────────────────────────────────────
-DIMENSION 3: RETURNS ON CAPITAL (0–100)
-─────────────────────────────────────────
-ROIC is the single most predictive metric of long-term value creation.
+DIMENSION 6 — PHOENICIAN FIT
+Holistic assessment: Given everything above plus your research, how well does this fit Phoenician Capital's mandate? Consider founder/owner alignment, moat durability, scalability, whether it's genuinely under-followed, valuation attractiveness given quality and growth, and how it compares to the existing portfolio.
 
-→ ROIC level: compare to estimated WACC (assume 8–10% for most businesses)
-→ ROIC trend: improving = moat widening; declining = competitive erosion
-→ ROIC consistency: volatile ROIC signals cyclicality or execution risk
-→ ROE cross-check: if ROE >> ROIC, leverage is driving returns (not economic quality)
-→ For growing companies: is incremental capital deployed at high returns?
+RISK ASSESSMENT
+Separately assess investment risks. Consider: leverage risk, earnings quality risk, geographic/jurisdiction risk (EM vs. developed), customer concentration, management quality signals, competitive threats from your research, valuation risk (priced for perfection?), accounting quality. Assign a risk score where 0 = minimal risk and 100 = very high risk. Most quality businesses score 5–30.
 
-Calibration:
-  91–100  ROIC > 30% sustained, improving trend, strongly above cost of capital
-  76–90   ROIC 20–30%, stable or improving, strong spread over WACC
-  61–75   ROIC 12–20%, stable, meaningful spread over WACC
-  41–60   ROIC 7–12%, minimal spread over WACC
-  21–40   ROIC 3–7%, close to cost of capital, limited value creation
-  0–20    ROIC < 3%, negative, or no data
-
-─────────────────────────────────────────
-DIMENSION 4: GROWTH QUALITY & COMPOUNDING TRACK RECORD (0–100)
-─────────────────────────────────────────
-THIS IS THE MOST CRITICAL DIMENSION FOR IDENTIFYING GENUINE COMPOUNDERS.
-
-A consistent 15% grower for 5 years >> a 30% one-year grower followed by declines.
-Consistency is the primary differentiator. Compute it rigorously.
-
-→ Revenue CAGR across full available period (not just YoY)
-→ NI CAGR vs revenue CAGR — NI CAGR > Rev CAGR = margin expansion = moat evidence
-→ Growth consistency: compute each year's growth rate and assess variance
-   Low variance (all years within ±5pp of mean) = high quality
-   High variance (years ranging from -10% to +40%) = low quality, lumpy, cyclical
-→ Growth trajectory: most recent rate above or below historical average?
-   Accelerating = positive; decelerating = scrutinise carefully
-→ Down years: any year with negative revenue growth = significant penalty
-→ Your research: is this growth organic or acquisition-driven?
-
-Calibration:
-  91–100  Revenue CAGR 20%+, NI CAGR > Rev CAGR, near-zero variance, no down years
-  76–90   Revenue CAGR 12–20%, NI CAGR > Rev CAGR, low variance, no down years
-  61–75   Revenue CAGR 8–12%, positive NI expansion, moderate consistency
-  41–60   Revenue CAGR 4–8%, NI roughly in line, some year-to-year variation
-  21–40   Revenue CAGR < 4%, significant variance, or 1–2 down years
-  0–20    Revenue declining overall, multiple down years, or highly volatile
-
-─────────────────────────────────────────
-DIMENSION 5: BALANCE SHEET STRENGTH (0–100)
-─────────────────────────────────────────
-A strong balance sheet is optionality. A leveraged one is a constraint.
-
-→ Net debt position: net cash (negative net debt) is the gold standard
-→ Net Debt/EBITDA — primary leverage metric
-→ Interest coverage: EBIT / interest (> 10x comfortable; < 3x concerning)
-→ Balance sheet trajectory: leverage increasing or decreasing?
-→ Goodwill as % of total assets: > 50% signals acquisition-heavy, intangible-heavy risk
-
-Calibration:
-  91–100  Fortress — net cash, zero leverage, full financial optionality
-  76–90   Strong — leverage < 0.5x ND/EBITDA, substantial flexibility
-  61–75   Good — 0.5–1.5x ND/EBITDA, comfortable coverage
-  41–60   Adequate — 1.5–2.5x ND/EBITDA, manageable but limits flexibility
-  21–40   Stretched — 2.5–4x ND/EBITDA or goodwill-heavy
-  0–20    Distressed — > 4x leverage, covenant risk, or negative equity signals
-
-─────────────────────────────────────────
-DIMENSION 6: PHOENICIAN CAPITAL FIT (0–100)
-─────────────────────────────────────────
-Holistic judgment synthesising all five dimensions + portfolio context + your research.
-This is your overall conviction score as a senior analyst.
-
-→ Portfolio comparison: how does this compare to what Phoenician already owns?
-   Is it additive (new geography, new sector) or duplicative?
-   Is it a higher or lower quality version of an existing holding?
-→ Owner alignment: founder-led signals, CEO tenure, insider ownership
-→ Moat durability: what does your research reveal about competitive position sustainability?
-→ Scalability: can this grow 5–10x without proportional capital reinvestment?
-→ Information edge: genuinely under-followed? ($250M–$2B, limited sell-side coverage)
-→ Valuation: given ROIC and growth, is the current multiple attractive, fair, or stretched?
-   Key heuristic: EV/EBIT ÷ ROIC = "price per unit of return"
-   < 1.0x = potentially cheap; 1.5–2.0x = fair; > 2.5x = expensive
-→ Red flags from your research: governance, customer concentration, key-person risk
-
-Calibration:
-  91–100  Must investigate immediately — rare, all criteria firing, portfolio-additive
-  76–90   High conviction — strong compounder, one or two manageable concerns
-  61–75   Interesting — quality business, worth deeper research, some gaps
-  41–60   Marginal — interesting but insufficient differentiation for Phoenician
-  21–40   Weak fit — below Phoenician's quality or growth standards
-  0–20    No fit — fundamentally incompatible with mandate
+OVERALL FIT SCORE
+Give ONE overall score 0–100 representing your holistic conviction that this company belongs in Phoenician Capital's universe for further research. This is your final judgment integrating all dimensions. Be decisive — do not hedge by scoring everything 50–60.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-OUTPUT
+OUTPUT — RETURN ONLY THIS JSON
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-Rules:
-1. Every evidence field MUST cite specific numbers from the financial data
-2. Evidence must reference TRENDS not just point-in-time (e.g. "revenue CAGR of 14% over 4 years" not "revenue grew 14%")
-3. Use web search findings to enrich business_quality and phoenician_fit evidence
-4. investment_thesis must be ONE sentence: bull case + key risk in the same breath
-5. diligence_questions must be company-specific, not generic — questions a real analyst needs answered
-6. analyst_verdict: RESEARCH NOW = investigate within 2 weeks; WATCH = monitor for better entry; PASS = not for Phoenician
-
-Return ONLY this JSON:
 
 {
   "business_quality": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences citing gross margin %, trend, revenue CAGR, NI vs revenue growth, and moat source from research>"
+    "evidence": "<2-3 sentences with specific numbers and your research findings on moat>"
   },
   "unit_economics": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences citing FCF/NI ratio, FCF yield %, capex/revenue %, and cash conversion quality>"
+    "evidence": "<2-3 sentences citing FCF/NI ratio, FCF yield, capex intensity>"
   },
   "capital_returns": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences on ROIC level, ROIC trend over available period, and spread over estimated WACC>"
+    "evidence": "<2-3 sentences on ROIC level, trend, and spread over cost of capital>"
   },
   "growth_quality": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences on revenue CAGR, NI CAGR vs revenue CAGR, year-to-year consistency, and trajectory>"
+    "evidence": "<2-3 sentences on revenue CAGR, NI CAGR, consistency, and trajectory>"
   },
   "balance_sheet": {
     "score": <0-100>,
-    "evidence": "<1-2 sentences on net debt position, ND/EBITDA, and financial flexibility>"
+    "evidence": "<1-2 sentences on net debt, leverage, and financial flexibility>"
   },
   "phoenician_fit": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences on portfolio comparison, moat assessment, valuation context, and mandate alignment>"
+    "evidence": "<2-3 sentences on mandate alignment, portfolio comparison, moat from research>"
   },
-  "investment_thesis": "<One sentence: bull case + key risk in the same breath, with specific numbers>",
+  "risk_score": <0-100>,
+  "risk_evidence": "<2-3 sentences on the key risks — be specific, cite actual metrics and research findings>",
+  "overall_fit_score": <0-100>,
+  "investment_thesis": "<One sentence: bull case + key risk with specific numbers>",
   "diligence_questions": [
-    "<Specific question 1 — must be answerable through public research>",
+    "<Specific question 1 a real analyst must answer before conviction>",
     "<Specific question 2>",
     "<Specific question 3>"
   ],
   "analyst_verdict": "<RESEARCH NOW | WATCH | PASS>",
-  "analyst_note": "<One specific, data-grounded sentence: the single most important thing about this company>"
+  "analyst_note": "<One specific data-grounded sentence: the single most important thing about this company>"
 }

@@ -302,28 +302,36 @@ class FitScorer:
         )
         all_criteria.extend(ei_scores)
 
-        # ── ADDITIVE BONUS SCORING ────────────────────────────────────────────
-        # Score = earned_points / available_max * 100
-        # "Available max" excludes criteria where data is missing
-        # This means a company is never penalised for data we don't have
+        # ── FINAL SCORE COMPUTATION ───────────────────────────────────────────
+        # If agent ran: use overall_fit_score directly (LLM's holistic judgment)
+        # If agent failed: use additive Python threshold scoring
 
-        earned = 0.0
-        available_max = 0.0
+        overall_fit_criterion = next(
+            (c for c in all_criteria if c.name == "overall_fit"), None
+        )
 
-        for criterion in all_criteria:
-            if _is_criteria_missing_data(criterion):
-                # Data unavailable — exclude from denominator entirely
-                # The company neither gains nor loses points
-                continue
-            earned += criterion.score
-            available_max += criterion.max_score
-
-        if available_max <= 0:
-            total = 0.0
+        if overall_fit_criterion is not None and overall_fit_criterion.score > 0:
+            # LLM gave us a holistic overall score — use it directly
+            total = min(100.0, max(0.0, overall_fit_criterion.score))
+            logger.info("Fit score for %s: %.1f/100 (LLM overall_fit)",
+                        company.ticker, total)
         else:
-            # Normalise to 100
-            total = min(100.0, max(0.0, (earned / available_max) * 100.0))
+            # Python fallback: additive bonus scoring
+            earned = 0.0
+            available_max = 0.0
+            for criterion in all_criteria:
+                if _is_criteria_missing_data(criterion):
+                    continue
+                if criterion.name in ("overall_fit", "llm_risk_score", "analyst_thesis"):
+                    continue
+                earned += criterion.score
+                available_max += criterion.max_score
 
-        logger.info("Fit score for %s: %.1f/100 (earned %.1f / available %.1f)",
-                    company.ticker, total, earned, available_max)
+            if available_max <= 0:
+                total = 0.0
+            else:
+                total = min(100.0, max(0.0, (earned / available_max) * 100.0))
+            logger.info("Fit score for %s: %.1f/100 (Python fallback, earned %.1f / available %.1f)",
+                        company.ticker, total, earned, available_max)
+
         return total, all_criteria
