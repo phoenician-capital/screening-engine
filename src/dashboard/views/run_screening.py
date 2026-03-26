@@ -9,9 +9,16 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import time
+import threading
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from src.config.settings import settings
 import streamlit as st
+
+# ── Global job state — survives Streamlit session resets and browser refreshes ──
+# Using module-level dict means the background thread can always write to it
+# even if the user refreshes the page mid-run.
+_GLOBAL_JOB: dict = {}
+_GLOBAL_JOB_LOCK = threading.Lock()
 
 
 def _run(coro, timeout: int = 1800):
@@ -196,61 +203,57 @@ def render() -> None:
 
     mode, theme, sim_ticker = "screener", "", ""
 
-    # ── Background job state ───────────────────────────────────────────────────
-    job = st.session_state.get("screening_job")
+    # ── Background job state — use global dict, survives page refreshes ──────────
+    # Always read from _GLOBAL_JOB so we can track a run even if session resets
+    job = _GLOBAL_JOB if _GLOBAL_JOB else None
 
     # ── Start new job ──────────────────────────────────────────────────────────
-    if run_clicked:
-        st.session_state.pop("run_results", None)
-        st.session_state.pop("run_error",   None)
-
-        import threading
-
-        job_state = {
+    if run_clicked and not (job and not job.get("done")):
+        # Don't start a second run if one is already in progress
+        _GLOBAL_JOB.clear()
+        _GLOBAL_JOB.update({
             "step": 1, "done": False, "error": None,
             "tickers": [], "scored": 0, "top_n": [],
             "d1": "", "d2": "", "d3": "", "d4": "",
             "t0": time.time(),
-        }
+        })
+        job = _GLOBAL_JOB
 
         def _bg_run():
             try:
-                t0 = job_state["t0"]
-                job_state["step"] = 1
+                t0 = _GLOBAL_JOB["t0"]
+                _GLOBAL_JOB["step"] = 1
                 tickers = _run(_discover_and_ingest(max_co, mode, theme, sim_ticker))
-                job_state["tickers"] = tickers
-                job_state["d1"] = f"Found {len(tickers)} candidates in {time.time()-t0:.0f}s"
-                job_state["d2"] = "Financials from SEC EDGAR XBRL"
-                job_state["step"] = 2
+                _GLOBAL_JOB["tickers"] = tickers
+                _GLOBAL_JOB["d1"] = f"Found {len(tickers)} candidates in {time.time()-t0:.0f}s"
+                _GLOBAL_JOB["d2"] = "Financials from FMP + Yahoo Finance"
+                _GLOBAL_JOB["step"] = 2
 
                 t2 = time.time()
-                job_state["step"] = 3
+                _GLOBAL_JOB["step"] = 3
                 scored = _run(_score(tickers if tickers else None))
-                job_state["scored"] = len(scored) if isinstance(scored, list) else 0
-                job_state["d3"] = f"{job_state['scored']} companies scored in {time.time()-t2:.1f}s"
+                _GLOBAL_JOB["scored"] = len(scored) if isinstance(scored, list) else 0
+                _GLOBAL_JOB["d3"] = f"{_GLOBAL_JOB['scored']} companies scored in {time.time()-t2:.1f}s"
 
                 t3 = time.time()
-                job_state["step"] = 4
+                _GLOBAL_JOB["step"] = 4
                 top_n = _run(_get_top_n())
-                job_state["top_n"] = top_n
-                job_state["d4"] = f"Top {len(top_n)} saved in {time.time()-t3:.1f}s"
+                _GLOBAL_JOB["top_n"] = top_n
+                _GLOBAL_JOB["d4"] = f"Top {len(top_n)} saved in {time.time()-t3:.1f}s"
 
                 import datetime as _dt
-                st.session_state.run_results      = top_n
-                st.session_state.run_completed_at = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
-                job_state["done"] = True
+                _GLOBAL_JOB["done"] = True
+                _GLOBAL_JOB["completed_at"] = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
             except Exception as err:
-                job_state["error"] = str(err)
-                job_state["done"]  = True
+                _GLOBAL_JOB["error"] = str(err)
+                _GLOBAL_JOB["done"]  = True
 
-        t = threading.Thread(target=_bg_run, daemon=False)  # non-daemon: survives rerender
+        t = threading.Thread(target=_bg_run, daemon=False, name="screening_bg")
         t.start()
-        job_state["thread"] = t
-        st.session_state["screening_job"] = job_state
         st.rerun()
 
     # ── Poll running job ───────────────────────────────────────────────────────
-    job = st.session_state.get("screening_job")
+    job = _GLOBAL_JOB if _GLOBAL_JOB else None
     if job and not job.get("done"):
         step  = job.get("step", 1)
         s1    = "done" if step > 1 else "running"
@@ -302,11 +305,12 @@ def render() -> None:
                 ),
                 unsafe_allow_html=True,
             )
-        st.session_state.pop("screening_job", None)
+        # Keep job state in global so results persist after page refresh
+        pass
 
     # ── Show results ──────────────────────────────────────────────────────────
-    if st.session_state.get("run_results") and not run_clicked:
-        top_n = st.session_state.run_results
+    if job and job.get("done") and job.get("top_n") and not run_clicked:
+        top_n = job.get("top_n", [])
         st.markdown(
             '<div style="margin-top:24px;margin-bottom:12px;font-size:0.7rem;font-weight:600;'
             'text-transform:uppercase;letter-spacing:0.09em;color:#9ca3af">Last Run Results</div>',
@@ -319,16 +323,16 @@ def render() -> None:
             unsafe_allow_html=True,
         )
 
-    elif not run_clicked and not st.session_state.get("run_results"):
+    elif not run_clicked and not (job and job.get("top_n")):
         try:
             db_results = _run(_get_top_n())
             if db_results:
-                st.session_state.run_results = db_results
+                _GLOBAL_JOB.update({"done": True, "top_n": db_results})
                 st.rerun()
         except Exception:
             pass
 
-        if not st.session_state.get("run_results"):
+        if not (job and job.get("top_n")):
             st.markdown("""
             <div style="background:#ffffff;border:1px solid #e8eaed;border-radius:8px;
                         padding:48px 28px;text-align:center;margin-top:8px">
