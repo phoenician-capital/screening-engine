@@ -63,6 +63,11 @@ class Metric(Base):
     institutional_ownership_pct: Mapped[float | None] = mapped_column(Numeric)
     analyst_count: Mapped[int | None] = mapped_column(Integer)
 
+    # Capital allocation
+    stock_repurchased: Mapped[float | None] = mapped_column(Numeric)
+    stock_based_compensation: Mapped[float | None] = mapped_column(Numeric)
+    acquisitions_net: Mapped[float | None] = mapped_column(Numeric)
+
     # Market data
     market_cap_usd: Mapped[float | None] = mapped_column(Numeric)
     avg_daily_volume: Mapped[float | None] = mapped_column(Numeric)

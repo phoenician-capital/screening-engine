@@ -350,12 +350,15 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
     net_income   = inc.get("netIncome") or inc.get("bottomLineNetIncome")
     ebitda       = inc.get("ebitda")
     dep          = inc.get("depreciationAndAmortization")
-    op_cf        = cf.get("netCashProvidedByOperatingActivities") or cf.get("operatingCashFlow")
-    capex_raw    = cf.get("capitalExpenditure") or cf.get("investmentsInPropertyPlantAndEquipment")
-    capex        = abs(capex_raw) if capex_raw is not None else None
-    fcf          = cf.get("freeCashFlow") or ((op_cf - capex) if op_cf and capex else op_cf)
-    cash         = cf.get("cashAtEndOfPeriod")
-    market_cap   = km.get("marketCap") or (pro.get("marketCap") if isinstance(pro, dict) else None)
+    op_cf            = cf.get("netCashProvidedByOperatingActivities") or cf.get("operatingCashFlow")
+    capex_raw        = cf.get("capitalExpenditure") or cf.get("investmentsInPropertyPlantAndEquipment")
+    capex            = abs(capex_raw) if capex_raw is not None else None
+    fcf              = cf.get("freeCashFlow") or ((op_cf - capex) if op_cf and capex else op_cf)
+    cash             = cf.get("cashAtEndOfPeriod")
+    stock_repurchased = cf.get("commonStockRepurchased") or cf.get("netCommonStockIssuance")
+    stock_based_comp  = cf.get("stockBasedCompensation")
+    acquisitions_net  = cf.get("acquisitionsNet")
+    market_cap        = km.get("marketCap") or (pro.get("marketCap") if isinstance(pro, dict) else None)
 
     # Revenue growth
     rev_yoy = None
@@ -449,9 +452,12 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
         "fcf_yield_direct":     fcf_yield,
         "capex_rev_direct":     capex_rev,
         "market_cap_fmp":       market_cap,
-        "is_founder_led":       is_founder_led,
+        "is_founder_led":        is_founder_led,
         "insider_ownership_pct": insider_ownership_pct,
-        "ceo_name":             ceo_name,
+        "ceo_name":              ceo_name,
+        "stock_repurchased":     stock_repurchased,
+        "stock_based_compensation": stock_based_comp,
+        "acquisitions_net":      acquisitions_net,
     }
     _cache_set(f"fmp:fin:{ticker}", result, ttl=86400)  # cache 24h
     return result
@@ -654,9 +660,12 @@ def _compute_metrics(ticker: str, market_cap: float | None,
         "ev_ebit": ev_ebit, "ev_fcf": ev_fcf,
         "shares_outstanding": shares,
         "pe_ratio": None, "avg_daily_volume": None,
-        "insider_ownership_pct": fin.get("insider_ownership_pct"),
+        "insider_ownership_pct":     fin.get("insider_ownership_pct"),
         "institutional_ownership_pct": None,
-        "analyst_count": None,
+        "analyst_count":             None,
+        "stock_repurchased":         fin.get("stock_repurchased"),
+        "stock_based_compensation":  fin.get("stock_based_compensation"),
+        "acquisitions_net":          fin.get("acquisitions_net"),
     }
 
 

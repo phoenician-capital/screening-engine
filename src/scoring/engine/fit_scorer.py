@@ -21,6 +21,10 @@ from src.scoring.criteria import (
     score_scalability,
     score_unit_economics,
     score_valuation,
+    score_capital_allocation,
+    score_balance_sheet,
+    score_quality_trifecta,
+    score_earnings_integrity,
 )
 from src.shared.types import CriterionScore, ScoringResult
 
@@ -185,8 +189,16 @@ class FitScorer:
             if company.country and company.country not in ("US", ""):
                 has_intl = True
 
-            # Recurring revenue: keyword scan in company description
+            # International revenue %: extract from description
             desc = (company.description or "").lower() if hasattr(company, "description") else ""
+            import re as _re
+            intl_match = _re.search(r'(\d+)%.*?international|international.*?(\d+)%', desc)
+            if intl_match:
+                pct = int(intl_match.group(1) or intl_match.group(2) or 0)
+                if pct >= 20:
+                    has_intl = True
+
+            # Recurring revenue: keyword scan in company description
             _RECURRING_KEYWORDS = (
                 "subscription", "saas", "software-as-a-service", "recurring revenue",
                 "annual recurring", "maintenance contract", "service contract",
@@ -210,6 +222,50 @@ class FitScorer:
             cfg=scale_cfg,
         )
         all_criteria.extend(scale_scores)
+
+        # ── G. Quality Trifecta (bonus, max 5) ───────────────────────────────
+        # Awards extra points when GM + ROIC + FCF yield all above threshold
+        fcf_yield_for_trifecta = _f(metrics.fcf_yield)
+        if fcf_yield_for_trifecta and fcf_yield_for_trifecta > 0.50:
+            fcf_yield_for_trifecta = None  # cap anomalies
+        trifecta_scores = score_quality_trifecta(
+            gross_margin=_f(metrics.gross_margin),
+            roic=_f(metrics.roic),
+            fcf_yield=fcf_yield_for_trifecta,
+        )
+        all_criteria.extend(trifecta_scores)
+
+        # ── H. Capital Allocation (bonus, max 6) ─────────────────────────────
+        cap_alloc_scores = score_capital_allocation(
+            stock_repurchased=_f(metrics.stock_repurchased) if hasattr(metrics, "stock_repurchased") else None,
+            stock_based_comp=_f(metrics.stock_based_compensation) if hasattr(metrics, "stock_based_compensation") else None,
+            acquisitions_net=_f(metrics.acquisitions_net) if hasattr(metrics, "acquisitions_net") else None,
+            revenue=_f(metrics.revenue),
+            market_cap=_f(metrics.market_cap_usd),
+        )
+        all_criteria.extend(cap_alloc_scores)
+
+        # ── I. Balance Sheet Quality (bonus, max 5) ───────────────────────────
+        bs_scores = score_balance_sheet(
+            net_debt=_f(metrics.net_debt) if hasattr(metrics, "net_debt") else None,
+            current_ratio=_f(metrics.current_ratio) if hasattr(metrics, "current_ratio") else None,
+            goodwill=_f(metrics.goodwill) if hasattr(metrics, "goodwill") else None,
+            total_assets=_f(metrics.total_assets),
+            cash=_f(metrics.cash) if hasattr(metrics, "cash") else None,
+            market_cap=_f(metrics.market_cap_usd),
+        )
+        all_criteria.extend(bs_scores)
+
+        # ── J. Earnings Integrity (bonus, max 3) ─────────────────────────────
+        ei_scores = score_earnings_integrity(
+            revenue=_f(metrics.revenue),
+            revenue_prior=_f(metrics.revenue_prior_year) if hasattr(metrics, "revenue_prior_year") else None,
+            accounts_receivable=_f(metrics.accounts_receivable) if hasattr(metrics, "accounts_receivable") else None,
+            accounts_receivable_prior=_f(metrics.accounts_receivable_prior) if hasattr(metrics, "accounts_receivable_prior") else None,
+            net_income=_f(metrics.net_income),
+            fcf=_f(metrics.fcf),
+        )
+        all_criteria.extend(ei_scores)
 
         # ── ADDITIVE BONUS SCORING ────────────────────────────────────────────
         # Score = earned_points / available_max * 100
