@@ -113,13 +113,11 @@ Adjust all screening criteria without touching code. Changes take effect on the 
 - Excluded countries: China, Russia, Iran, North Korea, Syria, Belarus
 - Profitability requirement (net income > 0)
 
-**Scoring Weights** (tune the framework):
-- Business Quality (default 30%) — gross margin, operating margin, ROIC, revenue growth
-- Unit Economics (default 25%) — FCF yield, FCF/NI ratio, capex intensity
-- Founder & Ownership (default 20%) — founder-led, insider ownership, insider buying
-- Valuation (default 15%) — sector-relative EV/EBITDA, P/FCF, PEG
-- Information Edge (default 5%) — analyst coverage, market cap sweet spot
-- Scalability (default 5%) — recurring revenue, international expansion
+**Scoring Weights** — the AI analyst agent scores the 6 core dimensions. The weights below govern how the supplementary Python signals are combined with the agent scores:
+- Founder & Ownership (20%) — founder detection, insider ownership %, Form 4 buying signals
+- Information Edge (5%) — analyst coverage, market cap sweet spot
+- Scalability (5%) — recurring revenue keywords, international expansion signals
+- Bonus signals — quality trifecta, capital allocation, balance sheet quality, earnings integrity
 
 **Portfolio Holdings** — your 19 tracked companies. Used as context for Claude's pre-screening ("avoid these but find similar quality elsewhere in the world").
 
@@ -140,24 +138,48 @@ Adjust all screening criteria without touching code. Changes take effect on the 
 
 ### Fit Score (Round 2 — 0 to 100)
 
-**Key design principle: Additive Bonus Model**
+**Powered by an AI Financial Analyst Agent**
 
-Every criterion is a bonus, never a penalty. If we can't measure something, the company gets 0 points for it — not a deduction. Score = (points earned) / (max of measurable criteria) × 100. This ensures companies are judged on what we know, not penalised for what we don't have data for.
+The Fit Score is no longer computed by Python thresholds. It is assessed by a Claude-powered Financial Analyst Agent that reads 5 years of financial history and scores the company the way a senior analyst at a hedge fund would — looking at trends, consistency, and quality, not just point-in-time numbers.
 
-| Dimension | Weight | What It Measures |
-|---|---|---|
-| **Business Quality** | 30% | Gross margin, operating margin, ROIC, revenue growth, margin expansion |
-| **Unit Economics** | 25% | FCF yield, FCF/NI ratio, capex intensity, positive FCF |
-| **Founder & Ownership** | 20% | Founder-led (detected from FMP), insider ownership %, insider buying activity |
-| **Valuation** | 15% | Sector-relative EV/EBITDA, Price/FCF, PEG ratio |
-| **Information Edge** | 5% | Analyst coverage, market cap sweet spot ($300M–$3B) |
-| **Scalability** | 5% | Recurring revenue (NLP from description), international expansion |
+**Why this matters:** A company with consistent 15% revenue CAGR over 5 years scores very differently from one with a single 15% year surrounded by flat/declining periods. The agent detects this. Python thresholds cannot.
 
-**Smart bonus signals (additive, on top of base score):**
+**How the agent works:**
+
+1. Receives the company's full 5-year income statement history (revenue, gross profit, EBIT, net income, FCF, capex)
+2. Computes multi-year CAGRs, year-to-year growth consistency, and margin expansion trends
+3. Scores 6 dimensions using institutional-grade criteria, with evidence for each score
+4. Falls back to Python threshold scoring if the agent is unavailable
+
+**The 6 dimensions the agent scores:**
+
+| Dimension | What the Agent Assesses |
+|---|---|
+| **Business Quality** | Gross margin level + trend, revenue CAGR, NI vs revenue growth (margin expansion evidence), pricing power signals |
+| **Unit Economics** | FCF/NI ratio (earnings quality), FCF yield, capex intensity, FCF growing faster than revenue |
+| **Capital Returns** | ROIC level, ROIC trend (moat widening vs. eroding), spread over WACC |
+| **Growth Quality** | Revenue CAGR over full period, NI CAGR vs revenue CAGR, year-to-year consistency, down years, trajectory |
+| **Balance Sheet** | Net cash vs. net debt, ND/EBITDA, interest coverage, financial flexibility |
+| **Phoenician Fit** | Holistic mandate alignment — moat, founder alignment, scalability, information edge, valuation context |
+
+**Supplementary Python signals (additive):**
+- **Founder & Ownership** — founder-led detection, insider ownership %, Form 4 insider buying activity
 - **Quality Trifecta** (+5 pts): GM > 50% AND ROIC > 15% AND FCF yield > 5% simultaneously
 - **Capital Allocation** (+6 pts): Active buybacks, low stock dilution, disciplined M&A
 - **Balance Sheet Quality** (+5 pts): Net cash position, strong current ratio, low goodwill
-- **Earnings Integrity** (+3 pts): AR growth in line with revenue (no channel stuffing signals)
+- **Earnings Integrity** (+3 pts): AR growth in line with revenue (no channel stuffing)
+
+**Scoring calibration (agent-enforced):**
+
+| Score | What it means |
+|---|---|
+| 80–100 | Exceptional compounder — rare, all criteria firing |
+| 65–79 | High-conviction candidate — strong quality, worth deep research |
+| 50–64 | Good business — above average, some gaps |
+| 35–49 | Average — no clear edge, not compelling for Phoenician |
+| 0–34 | Below average or structurally challenged |
+
+The median global public company scores 40–55. A top-quartile business scores 65–75. A genuine compounder scores 80+.
 
 ### Risk Score (Round 3 — 5 to 100)
 
