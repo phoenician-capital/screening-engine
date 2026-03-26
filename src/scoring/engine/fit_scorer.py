@@ -61,7 +61,7 @@ def _is_criteria_missing_data(criterion: CriterionScore) -> bool:
 
 
 class FitScorer:
-    """Compute Phoenician Fit Score for a company using additive bonus model."""
+    """Compute Phoenician Fit Score using AI Financial Analyst Agent + Python supplementary signals."""
 
     def score(
         self,
@@ -73,8 +73,40 @@ class FitScorer:
         current_price: float | None = None,
         week52_low: float | None = None,
         transcript_signals: dict | None = None,
+        historical: list[dict] | None = None,
     ) -> tuple[float, list[CriterionScore]]:
+        import asyncio as _asyncio
+        from src.scoring.engine.analyst_agent import score_with_analyst_agent
+
         all_criteria: list[CriterionScore] = []
+
+        # ── STEP 1: AI Financial Analyst Agent (primary scoring) ──────────────
+        # Agent reads 5yr history, assesses quality/consistency/trends
+        # Returns 6 dimension scores with evidence
+        try:
+            loop = _asyncio.get_event_loop()
+            if loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                    agent_future = ex.submit(
+                        lambda: _asyncio.run(
+                            score_with_analyst_agent(company, metrics, historical)
+                        )
+                    )
+                    agent_criteria = agent_future.result(timeout=60)
+            else:
+                agent_criteria = loop.run_until_complete(
+                    score_with_analyst_agent(company, metrics, historical)
+                )
+        except Exception as e:
+            logger.warning("Agent scoring failed for %s: %s", company.ticker, e)
+            agent_criteria = []
+
+        if agent_criteria:
+            all_criteria.extend(agent_criteria)
+            logger.info("Using agent scoring for %s (%d dimensions)", company.ticker, len(agent_criteria))
+        else:
+            logger.info("Using Python threshold scoring for %s (agent unavailable)", company.ticker)
 
         from src.config.scoring_weights import load_scoring_weights
         weights = load_scoring_weights()
@@ -89,6 +121,11 @@ class FitScorer:
         def _f(v) -> float | None:
             return float(v) if v is not None else None
 
+        # Agent already covers: business_quality, unit_economics, capital_returns,
+        # growth_quality, balance_sheet, phoenician_fit
+        # Python adds: founder/ownership signals, insider buying, bonus criteria
+        # These are supplementary — agent handles the core quality dimensions
+
         # ── A. Founder / Ownership ────────────────────────────────────────────
         founder_scores = score_founder_ownership(
             is_founder_led=company.is_founder_led,
@@ -100,75 +137,71 @@ class FitScorer:
         )
         all_criteria.extend(founder_scores)
 
-        # ── B. Business Quality ───────────────────────────────────────────────
-        has_pricing_power = None
-        if claims:
-            has_pricing_power = any(
-                c.get("type") == "pricing_power" and c.get("confidence", 0) > 0.5
-                for c in claims
+        # ── B–D. Python scoring (only when agent unavailable) ────────────────
+        if not agent_criteria:
+            has_pricing_power = None
+            if claims:
+                has_pricing_power = any(
+                    c.get("type") == "pricing_power" and c.get("confidence", 0) > 0.5
+                    for c in claims
+                )
+            elif metrics.gross_margin is not None:
+                has_pricing_power = float(metrics.gross_margin) > 0.50
+
+            ebit_margin = _f(metrics.ebit_margin)
+            if ebit_margin is None and metrics.ebit is not None and metrics.revenue is not None:
+                rev = float(metrics.revenue)
+                if rev > 0:
+                    ebit_margin = float(metrics.ebit) / rev
+
+            quality_scores = score_business_quality(
+                gross_margin=_f(metrics.gross_margin),
+                roic=_f(metrics.roic),
+                revenue_growth_3yr=_f(metrics.revenue_growth_3yr_cagr),
+                has_pricing_power=has_pricing_power,
+                cfg=quality_cfg,
+                operating_margin=ebit_margin,
+                roa=_f(metrics.roic),
+                roe=_f(metrics.roe),
+                revenue_growth_yoy=_f(metrics.revenue_growth_yoy),
+                net_income_growth_yoy=None,
             )
-        elif metrics.gross_margin is not None:
-            has_pricing_power = float(metrics.gross_margin) > 0.50
+            all_criteria.extend(quality_scores)
 
-        # Use ebit_margin directly — more accurate than roic*2 proxy
-        ebit_margin = _f(metrics.ebit_margin)
-        if ebit_margin is None and metrics.ebit is not None and metrics.revenue is not None:
-            rev = float(metrics.revenue)
-            if rev > 0:
-                ebit_margin = float(metrics.ebit) / rev
+            mgmt_cfg = quality_cfg.get("management_quality_signal", {})
+            ts = transcript_signals or {}
+            mgmt_scores = score_management_quality(
+                guidance_direction=ts.get("guidance_direction"),
+                management_tone=ts.get("management_tone"),
+                margin_commentary=ts.get("margin_commentary"),
+                competitive_positioning=ts.get("competitive_positioning"),
+                cfg=mgmt_cfg,
+            )
+            all_criteria.extend(mgmt_scores)
 
-        quality_scores = score_business_quality(
-            gross_margin=_f(metrics.gross_margin),
-            roic=_f(metrics.roic),
-            revenue_growth_3yr=_f(metrics.revenue_growth_3yr_cagr),
-            has_pricing_power=has_pricing_power,
-            cfg=quality_cfg,
-            operating_margin=ebit_margin,
-            roa=_f(metrics.roic),     # use ROIC as ROA proxy when ROA unavailable
-            roe=_f(metrics.roe),
-            revenue_growth_yoy=_f(metrics.revenue_growth_yoy),
-            net_income_growth_yoy=None,
-        )
-        all_criteria.extend(quality_scores)
+            fcf_yield = _f(metrics.fcf_yield)
+            if fcf_yield is not None and fcf_yield > 0.50:
+                fcf_yield = None
 
-        # Management quality signal
-        mgmt_cfg = quality_cfg.get("management_quality_signal", {})
-        ts = transcript_signals or {}
-        mgmt_scores = score_management_quality(
-            guidance_direction=ts.get("guidance_direction"),
-            management_tone=ts.get("management_tone"),
-            margin_commentary=ts.get("margin_commentary"),
-            competitive_positioning=ts.get("competitive_positioning"),
-            cfg=mgmt_cfg,
-        )
-        all_criteria.extend(mgmt_scores)
+            unit_scores = score_unit_economics(
+                fcf=_f(metrics.fcf),
+                fcf_prior=None,
+                fcf_yield=fcf_yield,
+                capex_to_revenue=_f(metrics.capex_to_revenue),
+                cfg=unit_cfg,
+                net_income=_f(metrics.net_income),
+            )
+            all_criteria.extend(unit_scores)
 
-        # ── C. Unit Economics ─────────────────────────────────────────────────
-        # Cap FCF yield at 50% — above that is a data error (placeholder market cap)
-        fcf_yield = _f(metrics.fcf_yield)
-        if fcf_yield is not None and fcf_yield > 0.50:
-            fcf_yield = None  # treat as missing, not 50%+ yield
-
-        unit_scores = score_unit_economics(
-            fcf=_f(metrics.fcf),
-            fcf_prior=None,
-            fcf_yield=fcf_yield,
-            capex_to_revenue=_f(metrics.capex_to_revenue),
-            cfg=unit_cfg,
-            net_income=_f(metrics.net_income),
-        )
-        all_criteria.extend(unit_scores)
-
-        # ── D. Valuation ──────────────────────────────────────────────────────
-        medians = sector_medians or {}
-        val_scores = score_valuation(
-            ev_ebit=_f(metrics.ev_ebit),
-            ev_fcf=_f(metrics.ev_fcf),
-            sector_median_ev_ebit=_f(medians.get("median_ev_ebit")),
-            sector_median_ev_fcf=_f(medians.get("median_ev_fcf")),
-            cfg=val_cfg,
-        )
-        all_criteria.extend(val_scores)
+            medians = sector_medians or {}
+            val_scores = score_valuation(
+                ev_ebit=_f(metrics.ev_ebit),
+                ev_fcf=_f(metrics.ev_fcf),
+                sector_median_ev_ebit=_f(medians.get("median_ev_ebit")),
+                sector_median_ev_fcf=_f(medians.get("median_ev_fcf")),
+                cfg=val_cfg,
+            )
+            all_criteria.extend(val_scores)
 
         # ── E. Information Edge ───────────────────────────────────────────────
         edge_scores = score_information_edge(

@@ -156,7 +156,26 @@ class ScoringPipeline:
                     transcript_doc.meta.get("signals") if transcript_doc and transcript_doc.meta else None
                 )
 
-                # 7. Fit score
+                # 7. Fetch 5-year historical income statements for agent scoring
+                historical = None
+                try:
+                    from src.ingestion.sources.market_data.client import _fetch_fmp_financials
+                    import httpx as _httpx
+                    from src.config.settings import settings as _settings
+                    key = _settings.ingestion.fmp_api_key
+                    if key:
+                        async with _httpx.AsyncClient(timeout=15) as _hc:
+                            r = await _hc.get(
+                                "https://financialmodelingprep.com/stable/income-statement",
+                                params={"symbol": company.ticker, "period": "annual",
+                                        "limit": 5, "apikey": key}
+                            )
+                            if r.status_code == 200 and r.json():
+                                historical = r.json()
+                except Exception:
+                    pass  # historical stays None — agent uses current year only
+
+                # 8. Fit score (AI analyst agent + supplementary Python signals)
                 fit_score, fit_criteria = self.fit_scorer.score(
                     company=company,
                     metrics=metrics,
@@ -167,6 +186,7 @@ class ScoringPipeline:
                         if metrics.market_cap_usd and metrics.shares_outstanding and metrics.shares_outstanding > 0
                         else None,
                     transcript_signals=transcript_signals,
+                    historical=historical,
                 )
 
                 # 8. Risk score
