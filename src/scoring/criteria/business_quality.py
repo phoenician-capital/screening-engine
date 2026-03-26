@@ -65,10 +65,8 @@ def score_business_quality(
     om_weak = _t(c, "operating_margin", "weak",      0.10)
 
     om_score, om_evidence = 0.0, "Unknown"
-    # Use operating_margin if available, fall back to ROIC as proxy
-    om_val = operating_margin if operating_margin is not None else (
-        float(roic) * 2.0 if roic is not None else None
-    )
+    # Use operating_margin (ebit_margin) directly — no proxy
+    om_val = operating_margin
     if om_val is not None:
         if om_val >= om_exc:
             om_score = om_max
@@ -147,9 +145,15 @@ def score_business_quality(
         elif rg_val >= rg_weak:
             rg_score = rg_max * 0.4
             rg_evidence = f"Adequate revenue growth: {rg_val:.1%}"
+        elif rg_val >= 0.05:
+            rg_score = rg_max * 0.25
+            rg_evidence = f"Modest growth: {rg_val:.1%}"
+        elif rg_val >= 0.0:
+            rg_score = rg_max * 0.10
+            rg_evidence = f"Flat revenue: {rg_val:.1%}"
         else:
-            rg_score = rg_max * 0.1
-            rg_evidence = f"Below-target growth: {rg_val:.1%}"
+            rg_score = 0.0
+            rg_evidence = f"Revenue declining: {rg_val:.1%}"
     scores.append(CriterionScore(name="revenue_growth", score=rg_score, max_score=rg_max, weight=1.0, evidence=rg_evidence))
 
     # ── Margin expansion (3 pts) — net income growing faster than revenue ───

@@ -65,6 +65,8 @@ def score_unit_economics(
     fni_score, fni_evidence = 0.0, "Earnings quality data unavailable"
     if fcf is not None and net_income is not None and net_income > 0:
         ratio = float(fcf) / float(net_income)
+        # Cap ratio at 5x — above that is usually a one-time item not real quality
+        ratio = min(ratio, 5.0)
         if ratio >= fni_exc:
             fni_score = fni_max
             fni_evidence = f"Excellent earnings quality: FCF/NI = {ratio:.1f}x"
@@ -77,6 +79,10 @@ def score_unit_economics(
         else:
             fni_score = 0.0
             fni_evidence = f"Low earnings quality: FCF/NI = {ratio:.1f}x (accruals may be elevated)"
+    elif fcf is not None and fcf > 0 and (net_income is None or net_income == 0):
+        # FCF positive but NI unavailable — partial credit
+        fni_score = fni_max * 0.4
+        fni_evidence = f"Positive FCF ${fcf/1e6:.0f}M — NI data unavailable for ratio"
     elif net_income is not None and net_income < 0:
         fni_evidence = "Company unprofitable — earnings quality N/A"
     scores.append(CriterionScore(name="fcf_to_net_income", score=fni_score, max_score=fni_max, weight=1.0, evidence=fni_evidence))

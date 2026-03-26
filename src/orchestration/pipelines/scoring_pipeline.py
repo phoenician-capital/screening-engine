@@ -230,9 +230,8 @@ class ScoringPipeline:
         await self.session.flush()
 
         # Re-rank ALL recommendations across all runs by rank_score descending
-        # This ensures every run re-sorts the full accumulated universe
+        # Deduplicate by ticker — keep only the highest rank_score per ticker
         from sqlalchemy import update as _update, select as _select
-        from src.config.scoring_weights import load_scoring_weights as _lsw
 
         all_recs = (await self.session.execute(
             _select(Recommendation)
@@ -241,14 +240,26 @@ class ScoringPipeline:
             .order_by(Recommendation.rank_score.desc())
         )).scalars().all()
 
+        # Deduplicate: keep only best score per ticker
+        seen_tickers: dict[str, Recommendation] = {}
+        for rec in all_recs:
+            if rec.ticker not in seen_tickers:
+                seen_tickers[rec.ticker] = rec
+            else:
+                # Mark duplicate as rank=None so it doesn't show
+                rec.rank = None
+
+        deduped = list(seen_tickers.values())
+        deduped.sort(key=lambda r: float(r.rank_score or 0), reverse=True)
+
         # Clear all ranks first
         await self.session.execute(_update(Recommendation).values(rank=None))
 
-        # Assign new ranks across ALL accumulated recommendations
-        for i, rec in enumerate(all_recs, 1):
+        # Assign new ranks — no limit, show all qualifying companies
+        for i, rec in enumerate(deduped, 1):
             rec.rank = i
 
-        ranked = all_recs  # for logging
+        ranked = deduped  # for logging
 
         # 11. Update scoring run stats
         scoring_run.tickers_scored = len(companies)

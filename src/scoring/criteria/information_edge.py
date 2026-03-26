@@ -36,6 +36,17 @@ def score_information_edge(
         else:
             cov_score = 0.0
             cov_evidence = f"Well-covered: {analyst_count} analysts"
+    else:
+        # Analyst count not available — partial credit if in sweet spot market cap
+        # Small/mid-cap international companies are inherently under-followed
+        if market_cap is not None:
+            mc = float(market_cap)
+            if 100_000_000 <= mc <= 1_000_000_000:
+                cov_score = ac_max * 0.5
+                cov_evidence = "Likely underfollowed: small-mid cap, coverage data unavailable"
+            elif mc <= 3_000_000_000:
+                cov_score = ac_max * 0.33
+                cov_evidence = "Possibly underfollowed: mid-cap, coverage data unavailable"
     scores.append(CriterionScore(name="analyst_coverage", score=cov_score, max_score=ac_max, weight=1.0, evidence=cov_evidence))
 
     # ── Market cap sweet spot (4 pts) ────────────────────────────────────────

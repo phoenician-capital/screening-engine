@@ -30,16 +30,21 @@ class HardFilterEngine:
         self.excluded_sectors      = set(hard.get("excluded_gics_sectors", []))
         self.excluded_sub_industries = set(hard.get("excluded_gics_sub_industries", []))
 
-        # Also map text sector names to codes for companies stored with full names
+        # Map GICS codes to text names AND include any text names directly in excluded_sectors
         _CODE_TO_NAME = {
             "10": "energy", "15": "materials", "20": "industrials",
             "25": "consumer discretionary", "30": "consumer staples",
             "35": "health care", "40": "financials", "45": "information technology",
             "50": "communication services", "55": "utilities", "60": "real estate",
         }
-        self.excluded_sector_names = {
-            _CODE_TO_NAME[c] for c in self.excluded_sectors if c in _CODE_TO_NAME
-        }
+        # Build excluded names from codes AND from text entries in excluded_sectors
+        self.excluded_sector_names: set[str] = set()
+        for entry in self.excluded_sectors:
+            if entry in _CODE_TO_NAME:
+                self.excluded_sector_names.add(_CODE_TO_NAME[entry])
+            else:
+                # It's already a text name — add it directly
+                self.excluded_sector_names.add(entry.lower())
         self.excluded_countries    = set(c.upper() for c in hard.get("excluded_countries", [
             "CN", "RU", "IR", "KP", "SY", "BY"
         ]))

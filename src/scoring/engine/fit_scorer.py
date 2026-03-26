@@ -1,6 +1,11 @@
 """
 Phoenician Fit Score calculator (0–100).
-Aggregates all criteria into a single composite score.
+
+Key design principle: ADDITIVE BONUS MODEL
+- Every criterion is a bonus, never a penalty
+- Missing data = 0 points added, NOT a deduction
+- Score = points_earned / max_of_available_criteria * 100
+- This ensures companies are scored on what we know, not penalised for what we don't
 """
 from __future__ import annotations
 
@@ -21,9 +26,38 @@ from src.shared.types import CriterionScore, ScoringResult
 
 logger = logging.getLogger(__name__)
 
+# Criteria that are considered "unmeasurable" when data is missing
+# These are excluded from the denominator when None, rather than scoring 0
+_OPTIONAL_CRITERIA = {
+    "founder_led",
+    "insider_ownership",
+    "recent_insider_buying",
+    "insider_conviction",
+    "analyst_coverage",
+    "recurring_revenue",
+    "international_expansion",
+    "management_quality_signal",
+    "margin_expansion",
+    "peg_ratio",
+}
+
+
+def _is_criteria_missing_data(criterion: CriterionScore) -> bool:
+    """Return True if criterion scored 0 due to missing data (not due to failing)."""
+    missing_indicators = {
+        "Unknown", "unavailable", "data unavailable", "Coverage unknown",
+        "No insider buying", "No recent cluster", "No transcript", "PEG data unavailable",
+        "Margin expansion data unavailable", "Earnings quality data unavailable",
+    }
+    return (
+        criterion.score == 0.0
+        and criterion.name in _OPTIONAL_CRITERIA
+        and any(ind.lower() in (criterion.evidence or "").lower() for ind in missing_indicators)
+    )
+
 
 class FitScorer:
-    """Compute Phoenician Fit Score for a company."""
+    """Compute Phoenician Fit Score for a company using additive bonus model."""
 
     def score(
         self,
@@ -51,7 +85,7 @@ class FitScorer:
         def _f(v) -> float | None:
             return float(v) if v is not None else None
 
-        # ── A. Founder / Ownership (max 20) ──────────────────────────────────
+        # ── A. Founder / Ownership ────────────────────────────────────────────
         founder_scores = score_founder_ownership(
             is_founder_led=company.is_founder_led,
             insider_ownership_pct=_f(metrics.insider_ownership_pct),
@@ -62,7 +96,7 @@ class FitScorer:
         )
         all_criteria.extend(founder_scores)
 
-        # ── B. Business Quality (max 25) ─────────────────────────────────────
+        # ── B. Business Quality ───────────────────────────────────────────────
         has_pricing_power = None
         if claims:
             has_pricing_power = any(
@@ -72,18 +106,28 @@ class FitScorer:
         elif metrics.gross_margin is not None:
             has_pricing_power = float(metrics.gross_margin) > 0.50
 
+        # Use ebit_margin directly — more accurate than roic*2 proxy
+        ebit_margin = _f(metrics.ebit_margin)
+        if ebit_margin is None and metrics.ebit is not None and metrics.revenue is not None:
+            rev = float(metrics.revenue)
+            if rev > 0:
+                ebit_margin = float(metrics.ebit) / rev
+
         quality_scores = score_business_quality(
             gross_margin=_f(metrics.gross_margin),
             roic=_f(metrics.roic),
             revenue_growth_3yr=_f(metrics.revenue_growth_3yr_cagr),
             has_pricing_power=has_pricing_power,
             cfg=quality_cfg,
+            operating_margin=ebit_margin,
+            roa=_f(metrics.roic),     # use ROIC as ROA proxy when ROA unavailable
+            roe=_f(metrics.roe),
             revenue_growth_yoy=_f(metrics.revenue_growth_yoy),
-            net_income_growth_yoy=None,  # not yet in Metric model — placeholder
+            net_income_growth_yoy=None,
         )
         all_criteria.extend(quality_scores)
 
-        # Management quality signal (separate criterion in business_quality)
+        # Management quality signal
         mgmt_cfg = quality_cfg.get("management_quality_signal", {})
         ts = transcript_signals or {}
         mgmt_scores = score_management_quality(
@@ -95,18 +139,23 @@ class FitScorer:
         )
         all_criteria.extend(mgmt_scores)
 
-        # ── C. Unit Economics (max 20) ────────────────────────────────────────
+        # ── C. Unit Economics ─────────────────────────────────────────────────
+        # Cap FCF yield at 50% — above that is a data error (placeholder market cap)
+        fcf_yield = _f(metrics.fcf_yield)
+        if fcf_yield is not None and fcf_yield > 0.50:
+            fcf_yield = None  # treat as missing, not 50%+ yield
+
         unit_scores = score_unit_economics(
             fcf=_f(metrics.fcf),
             fcf_prior=None,
-            fcf_yield=_f(metrics.fcf_yield),
+            fcf_yield=fcf_yield,
             capex_to_revenue=_f(metrics.capex_to_revenue),
             cfg=unit_cfg,
             net_income=_f(metrics.net_income),
         )
         all_criteria.extend(unit_scores)
 
-        # ── D. Valuation (max 15) ─────────────────────────────────────────────
+        # ── D. Valuation ──────────────────────────────────────────────────────
         medians = sector_medians or {}
         val_scores = score_valuation(
             ev_ebit=_f(metrics.ev_ebit),
@@ -117,7 +166,7 @@ class FitScorer:
         )
         all_criteria.extend(val_scores)
 
-        # ── E. Information Edge (max 10) ─────────────────────────────────────
+        # ── E. Information Edge ───────────────────────────────────────────────
         edge_scores = score_information_edge(
             analyst_count=metrics.analyst_count,
             market_cap=_f(metrics.market_cap_usd),
@@ -125,18 +174,22 @@ class FitScorer:
         )
         all_criteria.extend(edge_scores)
 
-        # ── F. Scalability (max 10) ───────────────────────────────────────────
+        # ── F. Scalability ────────────────────────────────────────────────────
         has_intl = None
         has_recurring = None
         if claims:
-            has_intl     = any(c.get("type") == "international_expansion" for c in claims)
+            has_intl      = any(c.get("type") == "international_expansion" for c in claims)
             has_recurring = any(c.get("type") == "recurring_revenue" for c in claims)
         else:
+            # International: non-US companies inherently have international exposure
             if company.country and company.country not in ("US", ""):
                 has_intl = True
+
+            # Recurring revenue: broader sector heuristics
             sector = (company.gics_sector or "").lower()
             gm = float(metrics.gross_margin) if metrics.gross_margin is not None else 0
-            if ("technology" in sector or "software" in sector) and gm > 0.60:
+            recurring_sectors = ("technology", "software", "healthcare", "financial services")
+            if any(s in sector for s in recurring_sectors) and gm > 0.50:
                 has_recurring = True
 
         scale_scores = score_scalability(
@@ -147,7 +200,28 @@ class FitScorer:
         )
         all_criteria.extend(scale_scores)
 
-        # ── Total ─────────────────────────────────────────────────────────────
-        total = min(100.0, max(0.0, sum(c.score for c in all_criteria)))
-        logger.info("Fit score for %s: %.1f/100", company.ticker, total)
+        # ── ADDITIVE BONUS SCORING ────────────────────────────────────────────
+        # Score = earned_points / available_max * 100
+        # "Available max" excludes criteria where data is missing
+        # This means a company is never penalised for data we don't have
+
+        earned = 0.0
+        available_max = 0.0
+
+        for criterion in all_criteria:
+            if _is_criteria_missing_data(criterion):
+                # Data unavailable — exclude from denominator entirely
+                # The company neither gains nor loses points
+                continue
+            earned += criterion.score
+            available_max += criterion.max_score
+
+        if available_max <= 0:
+            total = 0.0
+        else:
+            # Normalise to 100
+            total = min(100.0, max(0.0, (earned / available_max) * 100.0))
+
+        logger.info("Fit score for %s: %.1f/100 (earned %.1f / available %.1f)",
+                    company.ticker, total, earned, available_max)
         return total, all_criteria

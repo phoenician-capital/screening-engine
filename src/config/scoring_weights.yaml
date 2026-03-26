@@ -17,13 +17,15 @@ categories:
       insider_ownership:
         max_points: 6
         thresholds:
-          excellent: 0.20   # ≥ 20% = full points
-          good: 0.10        # ≥ 10%
+          excellent: 0.15   # ≥ 15% = full points
+          good: 0.05        # ≥ 5%
           weak: 0.01        # any ownership
       recent_insider_buying:
         max_points: 4
         description: "Insider buying activity in last 3 years"
         lookback_years: 3
+        min_transaction_usd: 50000
+        strong_transaction_usd: 1000000
       insider_conviction:
         max_points: 2
         description: "Cluster insider buying near 52-week low"
@@ -32,118 +34,117 @@ categories:
         strong_transaction_usd: 1000000
 
   business_quality:
-    weight: 25
+    weight: 30
     sub_criteria:
       gross_margin:
-        max_points: 5
+        max_points: 8
         thresholds:
-          excellent: 0.70   # ≥ 70%
-          good: 0.50        # ≥ 50%
-          moderate: 0.30    # ≥ 30%
+          excellent: 0.60   # ≥ 60%
+          good: 0.40        # ≥ 40%
+          moderate: 0.25    # ≥ 25%
           weak: 0.15        # ≥ 15% (hard filter floor)
       operating_margin:
-        max_points: 4
+        max_points: 6
         thresholds:
-          excellent: 0.25   # ≥ 25%
-          good: 0.15        # ≥ 15%
-          weak: 0.10        # ≥ 10%
+          excellent: 0.20   # ≥ 20%
+          good: 0.12        # ≥ 12%
+          weak: 0.07        # ≥ 7%
       roa_roe:
-        max_points: 4
-        description: "ROA ≥ 5–15% or ROE ≥ 10–45% (best of both)"
+        max_points: 6
+        description: "ROIC ≥ 8–20% (best proxy for capital efficiency)"
         thresholds:
-          roa_excellent: 0.15
-          roa_good: 0.08
-          roa_weak: 0.05
-          roe_excellent: 0.35
-          roe_good: 0.20
+          roa_excellent: 0.20
+          roa_good: 0.12
+          roa_weak: 0.08
+          roe_excellent: 0.30
+          roe_good: 0.18
           roe_weak: 0.10
       revenue_growth:
-        max_points: 5
+        max_points: 6
         thresholds:
           excellent: 0.20   # ≥ 20% YoY
-          good: 0.12        # ≥ 12%
-          weak: 0.08        # ≥ 8% (baseline target)
+          good: 0.10        # ≥ 10%
+          weak: 0.05        # ≥ 5%
       margin_expansion:
-        max_points: 3
+        max_points: 4
         description: "Net income growing faster than revenue"
-        # bonus points — not a disqualifier
       management_quality_signal:
         max_points: 4
         description: "LLM-extracted earnings transcript signals"
 
   unit_economics:
-    weight: 20
+    weight: 25
     sub_criteria:
       fcf_positive:
         max_points: 4
         description: "Positive free cash flow"
       fcf_yield:
-        max_points: 6
+        max_points: 8
         thresholds:
-          excellent: 0.08   # ≥ 8%
-          good: 0.05        # ≥ 5%
-          weak: 0.03        # ≥ 3%
+          excellent: 0.06   # ≥ 6%
+          good: 0.04        # ≥ 4%
+          weak: 0.02        # ≥ 2%
       fcf_to_net_income:
-        max_points: 5
+        max_points: 6
         description: "FCF/Net Income ≥ 0.7 indicates high earnings quality"
         thresholds:
           excellent: 0.90
           good: 0.70
           weak: 0.50
       low_capex_intensity:
-        max_points: 5
+        max_points: 7
         thresholds:
           excellent: 0.05   # capex/revenue ≤ 5%
           good: 0.10        # ≤ 10%
-          weak: 0.15        # ≤ 15%
+          weak: 0.20        # ≤ 20%
 
   valuation_asymmetry:
     weight: 15
     sub_criteria:
       ev_ebitda:
-        max_points: 5
+        max_points: 6
         thresholds:
-          excellent: 8      # ≤ 8x
-          good: 13          # ≤ 13x
-          fair: 18          # ≤ 18x
+          excellent: 10     # ≤ 10x
+          good: 15          # ≤ 15x
+          fair: 22          # ≤ 22x
       price_to_fcf:
-        max_points: 5
+        max_points: 6
         thresholds:
-          excellent: 12     # ≤ 12x
-          good: 20          # ≤ 20x
-          fair: 30          # ≤ 30x
+          excellent: 15     # ≤ 15x
+          good: 25          # ≤ 25x
+          fair: 35          # ≤ 35x
       peg_ratio:
-        max_points: 5
+        max_points: 3
         thresholds:
           excellent: 0.8    # ≤ 0.8
-          good: 1.3         # ≤ 1.3
-          fair: 2.0         # ≤ 2.0
+          good: 1.5         # ≤ 1.5
+          fair: 2.5         # ≤ 2.5
 
   information_edge:
-    weight: 10
+    weight: 5
     sub_criteria:
       analyst_coverage:
         max_points: 6
         thresholds:
-          excellent: 2      # ≤ 2 analysts
-          good: 5           # ≤ 5
-          weak: 10          # ≤ 10
+          excellent: 3      # ≤ 3 analysts
+          good: 7           # ≤ 7
+          weak: 12          # ≤ 12
       market_cap_sweet_spot:
         max_points: 4
-        description: "Sweet spot: $300M–$3B (under-followed)"
-        min_usd: 300000000
+        description: "Sweet spot: $250M–$3B (under-followed)"
+        min_usd: 250000000
         max_usd: 3000000000
 
   scalability:
-    weight: 10
+    weight: 5
     sub_criteria:
       recurring_revenue:
         max_points: 6
         description: "Recurring/subscription revenue share"
         thresholds:
-          excellent: 0.80   # ≥ 80%
-          good: 0.60        # ≥ 60%
-          weak: 0.40        # ≥ 40%
+          excellent: 0.70   # ≥ 70%
+          good: 0.50        # ≥ 50%
+          weak: 0.30        # ≥ 30%
       international_expansion:
         max_points: 4
         description: "Geographic revenue diversification"
@@ -186,23 +187,28 @@ risk_criteria:
 
 # ── Hard disqualifiers ───────────────────────────────────────────
 hard_filters:
-  # Market cap
-  min_market_cap_usd: 100000000          # $100M
+  # Market cap — raise floor to $250M for better liquidity
+  min_market_cap_usd: 250000000          # $250M
   max_market_cap_usd: 10000000000        # $10B
 
   # Quality floors
   min_gross_margin: 0.15                 # 15% floor
-  min_avg_daily_volume_usd: 500000       # $500K/day
+  min_avg_daily_volume_usd: 250000       # $250K/day (relaxed for international)
 
   # Leverage cap
   max_leverage: 5.0                      # net_debt/EBITDA
 
-  # Excluded sectors (GICS codes)
+  # Excluded sectors (GICS codes and text names)
   excluded_gics_sectors:
-    - "10"   # Energy
-    - "55"   # Utilities
-    - "40"   # Financials (banks, BDCs, insurance, REITs — not Phoenician mandate)
-    - "60"   # Real Estate (REITs)
+    - "10"          # Energy
+    - "55"          # Utilities
+    - "40"          # Financials (banks, BDCs, insurance)
+    - "60"          # Real Estate (REITs)
+    - "Energy"
+    - "Utilities"
+    - "Financials"
+    - "Financial Services"
+    - "Real Estate"
 
   # Excluded countries
   excluded_countries:
@@ -216,13 +222,13 @@ hard_filters:
   # Require profitability — exclude companies with negative net income
   require_profitable: true
 
-  # Minimum composite score to include in output
-  min_composite_score: 20
+  # Minimum fit score to include in output — lowered so good companies aren't hidden
+  min_composite_score: 15
 
 # ── Ranking formula ──────────────────────────────────────────────
 ranking:
   fit_weight: 0.70
   risk_penalty_weight: 0.30
-  top_n_results: 5                       # top N per run
+  top_n_results: 50                      # show all qualifying companies, no artificial cap
   feedback_decay_per_reject: 0.02
   feedback_boost_per_accept: 0.03
