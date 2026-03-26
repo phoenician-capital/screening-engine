@@ -34,13 +34,14 @@ Step 1 — Discover (Claude AI)
   Claude acts as an intelligent filter — selects 300–500 companies worth investigating
   No artificial cap — Claude decides how many to select based on quality signals
 
-Step 2 — Ingest (FMP + LLM fallback)
+Step 2 — Ingest (FMP for US + Yahoo Finance for International)
   Fetches full financials for every Claude-selected company in parallel:
-    Revenue, gross profit, EBIT, net income, FCF, capex
-    ROIC, ROE, EV/EBITDA, FCF yield, leverage
-    Market cap, CEO name, IPO date (for founder detection)
-    Insider ownership %, stock buybacks, stock-based compensation
-  Falls back to Claude web search for international companies not on FMP
+    US companies → FMP API: revenue, margins, EBIT, FCF, ROIC, ROE, EV/EBITDA,
+                             market cap, CEO name, IPO date, insider ownership %,
+                             buybacks, stock-based compensation
+    International → Yahoo Finance Timeseries: revenue, gross profit, net income,
+                    operating income, FCF, capex — free, no auth, works globally
+    Last resort → Claude web search (only if both FMP and Yahoo fail)
 
 Step 3 — Score (10-dimension framework)
   Hard filters eliminate banks, REITs, utilities, financials, excluded countries
@@ -198,7 +199,8 @@ All companies across all screening runs are re-ranked together after every run. 
 |---|---|---|
 | **SEC EDGAR** | US company universe (~7,000 tickers), CIK numbers, XBRL financials, Form 4 insider transactions | US public companies |
 | **FMP (Financial Modeling Prep)** | Income statement, cash flow, key metrics, ratios, profile (CEO, IPO date, market cap, insider ownership) | US + major international |
-| **Claude AI (Anthropic)** | Intelligent universe pre-screening (300–500 companies from 2,600), investment memo generation, LLM fallback for international financials | Global |
+| **Claude AI (Anthropic)** | Intelligent universe pre-screening (300–500 companies from 2,600), investment memo generation | Global |
+| **Yahoo Finance Timeseries** | Annual revenue, gross profit, net income, operating income, FCF, capex for international companies — free, no auth, works from server | Global (all exchanges) |
 | **Curated International List** | 157 vetted companies across Scandinavia, Poland, Japan, Australia, Singapore, UK, Netherlands, Germany, etc. | Non-US exchanges |
 
 ---
@@ -294,6 +296,14 @@ ssh -i ~/.ssh/phoenician-bastion.pem ubuntu@13.49.7.145 \
    watchlist, exclusions, scoring_runs, insider_purchases, price_alerts \
    RESTART IDENTITY CASCADE; DELETE FROM companies;'"
 ```
+
+**Monitor logs via CloudWatch:**
+
+AWS Console → CloudWatch → Log Groups → **screening-engine-dashboard** → dashboard
+
+Direct link: `https://eu-north-1.console.aws.amazon.com/cloudwatch/home?region=eu-north-1#logsV2:log-groups/log-group/screening-engine-dashboard`
+
+Logs stream automatically from the EC2 instance in real time.
 
 ---
 
