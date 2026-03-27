@@ -859,10 +859,14 @@ async def _fmp_quality_prefilter(client: httpx.AsyncClient) -> list[dict]:
             ticker = str(item.get("symbol") or item.get("ticker") or "").upper()
             if not ticker:
                 continue
+            mc = item.get("marketCap") or 0
+            # FMP's marketCapLessThan filter is broken — apply client-side
+            if mc < 250_000_000 or mc > 5_000_000_000:
+                continue
             results.append({
                 "ticker":          ticker,
                 "name":            item.get("companyName") or item.get("name") or ticker,
-                "market_cap":      item.get("marketCap"),
+                "market_cap":      mc,
                 "gross_margin_pct": item.get("grossProfitMargin"),  # decimal, e.g. 0.62
                 "revenue_growth":  item.get("revenueGrowth"),       # decimal, e.g. 0.15
                 "exchange":        (item.get("exchangeShortName") or item.get("exchange") or "").upper(),
