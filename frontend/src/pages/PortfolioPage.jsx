@@ -175,6 +175,7 @@ export default function PortfolioPage() {
   }, [scan?.running])
 
   const startScan = async () => {
+    setScan(null)
     setScanning(true)
     try {
       const res = await api.scanPortfolio()
