@@ -101,6 +101,7 @@ class ScoringPipeline:
         self,
         tickers: list[str] | None = None,
         run_type: str = "manual",
+        bypass_data_check: bool = False,
     ) -> list[dict[str, Any]]:
         """
         Run the full scoring pipeline.
@@ -154,14 +155,14 @@ class ScoringPipeline:
                     logger.warning("No metrics for %s, skipping", company.ticker)
                     return
 
-                # 3b. Skip companies with no usable financial data
+                # 3b. Skip companies with no usable financial data (unless bypassed for portfolio scans)
                 has_data = any([
                     metrics.revenue is not None,
                     metrics.ebit is not None,
                     metrics.net_income is not None,
                     metrics.total_assets is not None,
                 ])
-                if not has_data:
+                if not has_data and not bypass_data_check:
                     logger.debug("Skipping %s — no financial data", company.ticker)
                     return
 

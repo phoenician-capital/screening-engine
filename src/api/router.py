@@ -371,7 +371,7 @@ async def start_portfolio_scan():
                 try:
                     async with fac() as sess:
                         pipe = ScoringPipeline(sess)
-                        return await pipe.run(tickers=tickers, run_type="portfolio_scan")
+                        return await pipe.run(tickers=tickers, run_type="portfolio_scan", bypass_data_check=True)
                 finally:
                     await eng.dispose()
 
