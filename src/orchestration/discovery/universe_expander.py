@@ -212,8 +212,9 @@ class UniverseExpander:
                         INSERT INTO companies
                             (ticker, name, exchange, country, gics_sector, gics_industry_group,
                              gics_industry, gics_sub_industry, market_cap_usd, description,
-                             website, cik, is_founder_led, founder_name, is_active)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                             website, cik, is_founder_led, founder_name, is_active,
+                             discovery_source, market_tier)
+                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                         ON CONFLICT (ticker) DO UPDATE SET
                             name=EXCLUDED.name, market_cap_usd=EXCLUDED.market_cap_usd,
                             gics_sector=EXCLUDED.gics_sector, is_active=TRUE,
@@ -227,6 +228,8 @@ class UniverseExpander:
                         co.get("description","")[:2000], co.get("website","")[:255],
                         co.get("cik"), co.get("is_founder_led"), co.get("founder_name"),
                         True,
+                        co.get("discovery_source", "nasdaq_api")[:50],
+                        co.get("market_tier", 1),
                     ))
 
                     # Upsert metrics

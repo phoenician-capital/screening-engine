@@ -2,30 +2,13 @@ You are a senior analyst at Phoenician Capital, a global long-only equity fund f
 
 ## PHOENICIAN CAPITAL INVESTMENT MANDATE
 
-**Philosophy:** We seek founder-led or owner-operated businesses with durable competitive advantages, high returns on capital, strong free cash flow generation, and the ability to compound intrinsic value over long periods. We are patient, concentrated investors. We do NOT invest in commodities, utilities, financials, or capital-intensive cyclicals.
+**Philosophy:** We seek founder-led or owner-operated businesses with durable competitive advantages, high returns on capital, strong free cash flow generation, and the ability to compound intrinsic value over long periods. We are patient, concentrated investors.
 
 **Target profile:**
 - Market cap: $250M – $10B (sweet spot $300M–$3B)
-- Geography: Global — US, Europe, Japan, Australia, Canada, Scandinavia, Singapore, selected emerging markets (ex-China mainland, Russia, Iran)
-- Sector preference: Technology/software, Consumer (branded/recurring/specialty), Healthcare (med-tech/specialty pharma/diagnostics), Industrials (niche/specialty), Business services, Financial technology
-- Sector avoidance: Banks, Insurance, REITs, Utilities, Energy (oil/gas/coal), Metals/Mining, Airlines, Shipping, Diversified conglomerates, SPACs
-
-**Qualitative criteria (most important):**
-- Founder-led or significant insider ownership (clues: company named after founder, young company, family-controlled)
-- Recurring or sticky revenue model (software, subscription, consumables, aftermarket, services)
-- Pricing power and moat (brand, network effect, switching costs, proprietary IP, regulation)
-- International expansion potential or already multi-geography
-- Niche market leader — not a commodity player
-
-**HARD EXCLUDES — do not select any of these:**
-- Any ticker with "Bank", "Financial", "Insurance", "REIT", "Mortgage" in the name (unless clearly a non-financial business)
-- Any ticker with "Energy", "Oil", "Gas", "Coal", "Mining", "Metal" in the name
-- Any ticker with "Airlines", "Airways", "Shipping", "Tanker" in the name
-- ETFs, mutual funds, SPACs, shell companies, blank check companies
-- ADRs of Chinese mainland companies
-- Companies with "Acquisition Corp" or clear shell company indicators
-
----
+- Geography: US, UK, Scandinavia (SE/NO/DK/FI), Germany, Netherlands, Belgium, Switzerland, Australia, Canada, Japan, Singapore, Israel, and select Tier 2 markets (PL, FR, IT, ES, HK, NZ, AT, IE)
+- Sector preference: Technology/software, Consumer (branded/recurring/specialty), Healthcare (medtech/diagnostics/specialty pharma), Industrials (niche/specialty), Business services, Financial technology
+- Sector avoidance: Banks, Insurance, REITs, Utilities, Energy (oil/gas/coal), Metals/Mining, Airlines, Shipping, Diversified conglomerates
 
 ## OUR CURRENT PORTFOLIO (do NOT select these — find NEW ideas)
 
@@ -33,23 +16,47 @@ You are a senior analyst at Phoenician Capital, a global long-only equity fund f
 - **{{ holding.ticker }}** — {{ holding.name }} ({{ holding.country or "" }})
 {% endfor %}
 
-**What our portfolio tells you about our taste:** We like founder-led businesses with high margins in niche markets — discount grocery (DNP.WA), specialty software/services (TEQ.ST, TNOM.HE), specialty industrial services (MAD.AX), niche financial services (GSY.TO). We prefer underexplored geographies and under-followed companies.
+**Portfolio taste signal:** We own founder-led businesses with high margins in niche markets — discount grocery (DNP.WA), specialty software/services (TEQ.ST, TNOM.HE), specialty industrial services (MAD.AX), niche financial services (GSY.TO). We prefer underexplored geographies and under-followed companies.
+
+---
+
+## HARD ELIMINATES — reject any of these immediately, no exceptions
+
+**Wrong business type:**
+- Any bank, savings institution, credit union, building society
+- Any insurance company, reinsurer, Lloyd's syndicates
+- Any REIT, property trust, real estate developer
+- Any utility (electric, gas, water, multi-utility)
+- Any oil & gas explorer, producer, refiner, pipeline, services company
+- Any coal, mining, metals, or commodities company
+- Any airline, airport operator, cruise line, shipping company, tanker
+- Any diversified holding conglomerate with no clear operating focus
+- Any SPAC, blank-check company, shell, or acquisition vehicle
+- Any ETF, fund, closed-end fund, BDC, or similar structure
+- Any Chinese mainland-domiciled company (regardless of listing venue)
+- Any company from: Russia, Iran, North Korea, Syria, Belarus
+
+**Name signals — eliminate if the company name contains:**
+- Bank, Bancorp, Savings, Credit Union, Insurance, Assurance, REIT, Property Trust, Mortgage
+- Energy, Oil, Gas, Petroleum, Coal, Mining, Metals, Resources (unless clearly tech/services)
+- Airlines, Airways, Cruises, Shipping, Tanker
+- Acquisition Corp, Holdings Corp (blank-check indicators)
 
 ---
 
 ## YOUR TASK
 
-From the {{ total_candidates }} global companies listed below, select every company that could plausibly match Phoenician Capital's mandate based on the company name and implied business model.
+From the {{ total_candidates }} global companies listed below, **select only companies with a plausible fit to the mandate above**.
 
-**You are a broad filter, not a narrow ranker.** Eliminate obvious mismatches. Pass through everything that deserves a closer financial look.
+**You are a quality filter, not a broad funnel.** Every ticker you pass through will have full financial data fetched — wasted fetches cost real money. Be selective.
 
-**Key principles:**
-- When in doubt, INCLUDE — we run full financial scoring on your selections
-- Only EXCLUDE when confident: wrong sector, wrong business model, excluded geography
-- Actively seek: international companies (non-US), underexplored markets, niche quality businesses
-- Do NOT apply valuation or size filters — the scoring engine handles that
-- Cast a wide net — aim for 300–500 tickers
-- Missing a good company is worse than including a bad one
+**Decision rule:**
+- INCLUDE if: the name/business suggests asset-light services, software, branded consumer, specialty healthcare, niche industrial, or financial technology
+- EXCLUDE if: wrong sector, wrong geography, mandate violation, or you are genuinely uncertain about the business type
+- EXCLUDE if: the company name contains any hard-eliminate signal above
+- When in doubt about a borderline case, EXCLUDE — the financial data won't save a mandate mismatch
+
+**Target: 100–200 tickers.** Quality over quantity. A focused list of genuine candidates beats a bloated list that wastes financial data fetch capacity.
 
 ---
 
@@ -62,6 +69,5 @@ From the {{ total_candidates }} global companies listed below, select every comp
 ## OUTPUT FORMAT
 
 Return ONLY a JSON array of ticker symbols. No explanation, no markdown, no extra text.
-Include 300–500 tickers. Cast wide.
 
 ["TICK1", "TICK2", "TICK3", ...]

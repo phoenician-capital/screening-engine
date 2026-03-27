@@ -49,6 +49,13 @@ class HardFilterEngine:
             "CN", "RU", "IR", "KP", "SY", "BY"
         ]))
         self.excluded_tickers      = set(t.upper() for t in hard.get("excluded_tickers", []))
+        self.allowed_tier1         = set(c.upper() for c in hard.get("allowed_markets_tier1", [
+            "US","GB","SE","NO","DK","FI","DE","NL","BE","CH","AU","CA","JP","SG","IL",
+        ]))
+        self.allowed_tier2         = set(c.upper() for c in hard.get("allowed_markets_tier2", [
+            "PL","FR","IT","ES","AT","IE","NZ","HK",
+        ]))
+        self.tier2_min_score       = float(hard.get("tier2_min_score", 40))
         self.max_leverage          = float(hard.get("max_leverage", 5.0))
         self.min_gross_margin      = float(hard.get("min_gross_margin", 0.15))
         self.min_avg_daily_volume  = float(hard.get("min_avg_daily_volume_usd", 0))
@@ -77,6 +84,7 @@ class HardFilterEngine:
         net_income: float | None = None,
         company_name: str | None = None,
         ticker: str | None = None,
+        market_tier: int | None = None,
     ) -> FilterResult:
 
         # 0. Explicit ticker exclusion
@@ -110,9 +118,14 @@ class HardFilterEngine:
         if gics_sub_industry and gics_sub_industry in self.excluded_sub_industries:
             return FilterResult(passed=False, reason=f"Excluded sub-industry: {gics_sub_industry}")
 
-        # 3. Country exclusion
+        # 3. Country exclusion — hard block
         if country and country.upper() in self.excluded_countries:
             return FilterResult(passed=False, reason=f"Excluded country: {country}")
+
+        # 3b. Allowed market check — reject if outside Tier 1 + Tier 2 (when lists are configured)
+        _all_allowed = self.allowed_tier1 | self.allowed_tier2
+        if country and _all_allowed and country.upper() not in _all_allowed:
+            return FilterResult(passed=False, reason=f"Market not in allowed list: {country}")
 
         # 4. Market cap bounds
         if market_cap is not None:
@@ -140,6 +153,7 @@ class HardFilterEngine:
 
         return FilterResult(passed=True)
 
-    def passes_min_score(self, composite_score: float) -> bool:
-        """Final gate — composite score must meet minimum threshold."""
-        return composite_score >= self.min_composite_score
+    def passes_min_score(self, composite_score: float, market_tier: int = 1) -> bool:
+        """Final gate — Tier 2 markets must clear a higher bar than Tier 1."""
+        threshold = self.tier2_min_score if market_tier == 2 else self.min_composite_score
+        return composite_score >= threshold

@@ -200,6 +200,7 @@ class ScoringPipeline:
                     avg_daily_volume=float(metrics.avg_daily_volume) if metrics.avg_daily_volume else None,
                     net_income=float(metrics.net_income) if metrics.net_income else None,
                     company_name=company.name,
+                    market_tier=getattr(company, "market_tier", 1) or 1,
                 )
 
                 if not filter_result.passed:
@@ -298,8 +299,9 @@ class ScoringPipeline:
                     portfolio_avg=portfolio_avg,
                 )
 
-                # 11. Final gate
-                if not self.hard_filter.passes_min_score(fit_score):
+                # 11. Final gate — Tier 2 markets need a higher score
+                _tier = getattr(company, "market_tier", 1) or 1
+                if not self.hard_filter.passes_min_score(fit_score, market_tier=_tier):
                     logger.debug("Skipping %s — fit score %.1f below minimum", company.ticker, fit_score)
                     return
 

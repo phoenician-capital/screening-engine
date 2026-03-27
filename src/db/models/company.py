@@ -30,6 +30,9 @@ class Company(Base):
     is_founder_led: Mapped[bool | None] = mapped_column(Boolean)
     founder_name: Mapped[str | None] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Discovery provenance — how and when this company entered the universe
+    discovery_source: Mapped[str | None] = mapped_column(String(50))   # e.g. 'claude_dynamic', 'nasdaq_api', 'sec_edgar', 'portfolio_analog'
+    market_tier: Mapped[int | None] = mapped_column()                   # 1 = primary markets, 2 = secondary markets (higher quality bar)
     created_at: Mapped[dt.datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

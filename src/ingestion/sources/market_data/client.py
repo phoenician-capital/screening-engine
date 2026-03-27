@@ -892,147 +892,114 @@ async def _get_intl_candidates(client: httpx.AsyncClient,
                                 min_cap: float, max_cap: float,
                                 max_per_exchange: int = 50) -> list[dict]:
     """
-    Get international candidates by sampling known major stocks per exchange.
-    Uses Yahoo v8 chart to get price, derives market cap from shares when available.
-    Returns companies with estimated market cap in range.
+    Discover international candidates dynamically using Claude with web search.
+
+    Claude is given Phoenician's full mandate and asked to discover current,
+    specific tickers across allowed markets — pulling from live index data,
+    quality screeners, and sector-specific lists. No hardcoded tickers.
+    Each run produces a fresh, mandate-aligned candidate set.
+
+    Allowed markets (Tier 1 — no additional threshold):
+      US, GB, SE, NO, DK, FI, DE, NL, BE, CH, AU, CA, JP, SG, IL
+    Tier 2 — included but subject to higher fit score bar:
+      PL, FR, IT, ES, AT, IE, NZ, HK
+
+    Hard-excluded at discovery: CN (mainland), RU, IR, KP, SY, BY
+    Also excluded at discovery: banks, insurance, REITs, utilities,
+      energy/oil/gas/coal, mining/metals, airlines, shipping, SPACs,
+      conglomerates without a clear operating business.
     """
-    # Use a curated list of major international companies
-    # We pull from a well-known open dataset
-    intl_tickers: list[dict] = []
+    from src.shared.llm.client_factory import complete_with_search
+    from src.config.settings import settings as _settings
+    from src.prompts.loader import load_prompt
 
-    # Primary: use Wikipedia/public lists via a reliable source
-    sources = [
-        # Euro Stoxx 600 components via a GitHub dataset
-        "https://raw.githubusercontent.com/datasets/euronext/main/data/euronext.csv",
-        # FTSE All-Share
-        "https://raw.githubusercontent.com/JerBouma/FinanceDatabase/main/database/equities.json",
-    ]
+    # Load allowed/excluded markets from scoring config
+    try:
+        from src.config.scoring_weights import load_scoring_weights
+        _hw = load_scoring_weights().get("hard_filters", {})
+        _excluded = set(c.upper() for c in _hw.get("excluded_countries", [
+            "CN", "RU", "IR", "KP", "SY", "BY"
+        ]))
+        _allowed_t1 = set(c.upper() for c in _hw.get("allowed_markets_tier1", [
+            "US", "GB", "SE", "NO", "DK", "FI", "DE", "NL", "BE", "CH",
+            "AU", "CA", "JP", "SG", "IL",
+        ]))
+        _allowed_t2 = set(c.upper() for c in _hw.get("allowed_markets_tier2", [
+            "PL", "FR", "IT", "ES", "AT", "IE", "NZ", "HK",
+        ]))
+    except Exception:
+        _excluded  = _EXCLUDED_COUNTRIES
+        _allowed_t1 = {"US","GB","SE","NO","DK","FI","DE","NL","BE","CH","AU","CA","JP","SG","IL"}
+        _allowed_t2 = {"PL","FR","IT","ES","AT","IE","NZ","HK"}
 
-    # Fallback: build from exchange suffixes using known large-cap anchors
-    # and then get their market caps from Yahoo
-    # This is the most reliable approach given no premium data source
+    _allowed_all = _allowed_t1 | _allowed_t2
+    min_cap_m = int(min_cap / 1e6)
+    max_cap_b = int(max_cap / 1e9)
 
-    # Small/mid-cap international companies in $100M–$10B range
-    # Focused on exchanges represented in Phoenician portfolio
-    known_intl = [
-        # ── UK — small/mid caps ───────────────────────────────────────────────
-        ("JET2.L","Jet2","GB"),("ASAL.L","ASA International","GB"),
-        ("AT.L","Ashtead Technology","GB"),("SPSY.L","Spectra Systems","GB"),
-        ("BOY.L","Bodycote","GB"),("RWSA.L","Renewi","GB"),
-        ("CARD.L","Card Factory","GB"),("TRN.L","Trainline","GB"),
-        ("HFD.L","Halfords","GB"),("SHI.L","SHI International","GB"),
-        ("IGR.L","Inchcape","GB"),("MTO.L","Mitie","GB"),
-        ("FOUR.L","4imprint","GB"),("RWS.L","RWS Holdings","GB"),
-        ("IGP.L","IG Group","GB"),("NCC.L","NCC Group","GB"),
-        ("SLP.L","Sylvania Platinum","GB"),("MGAM.L","Morgan Advanced Materials","GB"),
-        ("JTC.L","JTC","GB"),("BEW.L","Bewick","GB"),
-        # ── Poland — Warsaw Stock Exchange ────────────────────────────────────
-        ("DNP.WA","Dino Polska","PL"),("APR.WA","Auto Partner","PL"),
-        ("SNT.WA","Synektik","PL"),("CDR.WA","CD Projekt","PL"),
-        ("PCO.WA","Polskie Gornictwo","PL"),("CCC.WA","CCC","PL"),
-        ("LPP.WA","LPP","PL"),("ALE.WA","Allegro","PL"),
-        ("PKN.WA","PKN Orlen","PL"),("MBK.WA","mBank","PL"),
-        ("GPW.WA","Warsaw Stock Exchange","PL"),("KGH.WA","KGHM","PL"),
-        ("ING.WA","ING Bank Slaski","PL"),("PZU.WA","PZU","PL"),
-        # ── Finland — Helsinki ────────────────────────────────────────────────
-        ("TNOM.HE","Talenom","FI"),("PUUILO.HE","Puuilo","FI"),
-        ("METSO.HE","Metso","FI"),("NESTE.HE","Neste","FI"),
-        ("NOKIA.HE","Nokia","FI"),("SAMPO.HE","Sampo","FI"),
-        ("FORTUM.HE","Fortum","FI"),("UPM.HE","UPM-Kymmene","FI"),
-        ("KEMIRA.HE","Kemira","FI"),("TIETO.HE","TietoEVRY","FI"),
-        ("OLVI.HE","Olvi","FI"),("HARVIA.HE","Harvia","FI"),
-        ("KAMUX.HE","Kamux","FI"),("REMEDY.HE","Remedy Entertainment","FI"),
-        # ── Sweden ────────────────────────────────────────────────────────────
-        ("TEQ.ST","Teqnion","SE"),("BETT-B.ST","Betsson","SE"),
-        ("NIBE-B.ST","NIBE","SE"),("SWMA.ST","Swedish Match","SE"),
-        ("ADDV-B.ST","AddLife","SE"),("BUFAB.ST","Bufab","SE"),
-        ("DIOS.ST","Diös Fastigheter","SE"),("HPOL-B.ST","H&M","SE"),
-        ("INDU-C.ST","Industrivärden","SE"),("LATO-B.ST","Latour","SE"),
-        ("NCAB.ST","NCAB Group","SE"),("OEM-B.ST","OEM International","SE"),
-        ("VITEC-B.ST","Vitec Software","SE"),("XANO-B.ST","XANO Industri","SE"),
-        # ── Norway ────────────────────────────────────────────────────────────
-        ("MOWI.OL","Mowi","NO"),("SALM.OL","SalMar","NO"),
-        ("BAKKA.OL","Bakkafrost","NO"),("LSG.OL","Lerøy Seafood","NO"),
-        ("ASTK.OL","Astock","NO"),("KAHOOT.OL","Kahoot","NO"),
-        ("SCATC.OL","Scatec","NO"),("SRBANK.OL","SpareBank 1 SR","NO"),
-        # ── Denmark ───────────────────────────────────────────────────────────
-        ("DEMANT.CO","Demant","DK"),("COLO-B.CO","Coloplast","DK"),
-        ("PNDORA.CO","Pandora","DK"),("GMAB.CO","Genmab","DK"),
-        ("RBREW.CO","Royal Unibrew","DK"),("NETC.CO","Netcompany","DK"),
-        ("ROCK-B.CO","Rockwool","DK"),("FLS.CO","FLSmidth","DK"),
-        # ── Germany — small/mid ───────────────────────────────────────────────
-        ("MBB.DE","MBB SE","DE"),("DWS.DE","DWS Group","DE"),
-        ("ARND.DE","Aroundtown","DE"),("BCMH.DE","Bilfinger","DE"),
-        ("EVK.DE","Evonik","DE"),("FNTN.DE","freenet","DE"),
-        ("GFT.DE","GFT Technologies","DE"),("HAG.DE","Hensoldt","DE"),
-        ("KNEBV.DE","Kone","DE"),("PDM.DE","Vossloh","DE"),
-        # ── Canada — small/mid ────────────────────────────────────────────────
-        ("GSY.TO","goeasy","CA"),("FOOD.TO","Goodfood Market","CA"),
-        ("TOY.TO","Spin Master","CA"),("PBH.TO","Premium Brands","CA"),
-        ("BYD.TO","Boyd Group","CA"),("CSW-A.TO","Corby Spirit","CA"),
-        ("FFH.TO","Fairfax Financial","CA"),("IFP.TO","Interfor","CA"),
-        ("MTY.TO","MTY Food Group","CA"),("SIS.TO","Savaria","CA"),
-        ("TVE.TO","Tamarack Valley","CA"),("WPK.TO","Winpak","CA"),
-        # ── Australia — small/mid ─────────────────────────────────────────────
-        ("MAD.AX","Mader Group","AU"),("NWL.AX","Netwealth Group","AU"),
-        ("ARB.AX","ARB Corporation","AU"),("EML.AX","EML Payments","AU"),
-        ("HUB.AX","Hub24","AU"),("ILU.AX","Iluka Resources","AU"),
-        ("JAN.AX","Janison Education","AU"),("LNK.AX","Link Administration","AU"),
-        ("MCR.AX","Mincor Resources","AU"),("MON.AX","Monash IVF","AU"),
-        ("NHF.AX","nib Holdings","AU"),("PME.AX","Pro Medicus","AU"),
-        ("REH.AX","Reece Group","AU"),("SKI.AX","Spark Infrastructure","AU"),
-        # ── Japan — small/mid ─────────────────────────────────────────────────
-        ("3445.T","RS Technologies","JP"),("2282.T","NH Foods","JP"),
-        ("2791.T","Nafco","JP"),("3048.T","BicCamera","JP"),
-        ("3382.T","Seven & i Holdings","JP"),("3563.T","FOOD & LIFE","JP"),
-        ("4021.T","Nissan Chemical","JP"),("4062.T","Ibiden","JP"),
-        ("4185.T","JSR Corp","JP"),("4452.T","Kao Corp","JP"),
-        ("6273.T","SMC Corp","JP"),("6367.T","Daikin","JP"),
-        ("6448.T","Brother Industries","JP"),("6501.T","Hitachi","JP"),
-        ("7741.T","Hoya Corp","JP"),("7751.T","Canon","JP"),
-        ("8750.T","Dai-ichi Life","JP"),("9843.T","Nitori Holdings","JP"),
-        # ── Singapore ─────────────────────────────────────────────────────────
-        ("QES.SI","China Sunsine","SG"),("S58.SI","SATS","SG"),
-        ("C6L.SI","Singapore Airlines","SG"),("A17U.SI","CapitaLand Ascendas","SG"),
-        ("ME8U.SI","Mapletree Industrial","SG"),("M44U.SI","Mapletree Logistics","SG"),
-        ("9CI.SI","CapitaLand Invest","SG"),("V03.SI","Venture Corp","SG"),
-        ("BN4.SI","Keppel Corp","SG"),("F34.SI","Wilmar Intl","SG"),
-        # ── Netherlands / Belgium ─────────────────────────────────────────────
-        ("IMCD.AS","IMCD Group","NL"),("BESI.AS","BE Semiconductor","NL"),
-        ("SBMO.AS","SBM Offshore","NL"),("FLOW.AS","Flows","NL"),
-        ("FAGR.BR","Fagron","BE"),("LOTB.BR","Lotus Bakeries","BE"),
-        ("UCB.BR","UCB","BE"),("COLR.BR","Colruyt","BE"),
-        # ── Greece ────────────────────────────────────────────────────────────
-        ("KRI.AT","Kri-Kri Milk","GR"),("MYTIL.AT","Mytilineos","GR"),
-        ("OPAP.AT","OPAP","GR"),("ETE.AT","NBG","GR"),
-        ("LAMDA.AT","Lamda Development","GR"),("EXAE.AT","ATHEX Group","GR"),
-        # ── India (non-excluded) — listed on US exchanges ──────────────────────
-        ("INTR","Inter & Co","BR"),  # Brazilian digital bank, US-listed
-    ]
+    logger.info("Discovering international candidates via Claude web search (dynamic)...")
 
-    # Exclude mandate countries
-    known_intl = [(t, n, c) for t, n, c in known_intl if c not in _EXCLUDED_COUNTRIES]
+    prompt = load_prompt(
+        "discovery/intl_candidate_discovery.j2",
+        allowed_markets_tier1=sorted(_allowed_t1 - {"US"}),
+        allowed_markets_tier2=sorted(_allowed_t2),
+        excluded_markets=sorted(_excluded),
+        min_cap_m=min_cap_m,
+        max_cap_b=max_cap_b,
+    )
 
-    import random
-    random.shuffle(known_intl)
+    try:
+        import json as _json
+        raw = await complete_with_search(
+            prompt=prompt,
+            model=_settings.llm.primary_model,
+            max_tokens=6000,
+            temperature=0.1,
+            max_searches=4,   # enough to pull from index lists + cross-check
+        )
+        text  = raw.strip()
+        start = text.find("[")
+        end   = text.rfind("]")
+        if start == -1 or end == -1:
+            raise ValueError("No JSON array in response")
 
-    # Return the curated list directly — no external API needed for the universe.
-    # Market cap and financials will be fetched by LLM in the ingestion step.
-    # Use a sentinel market_cap=500_000_000 ($500M) so the pipeline processes them;
-    # the LLM financial lookup will update with the real market cap.
-    results = [
-        {
-            "ticker":     t,
-            "name":       n,
-            "market_cap": 500_000_000,  # placeholder — LLM will set real value
-            "exchange":   "",
-            "country":    c,
-            "cik":        None,
-        }
-        for t, n, c in known_intl
-    ]
-    logger.info("International candidates: %d from curated list (LLM will fetch financials)", len(results))
-    return results
+        items = _json.loads(text[start:end+1])
+        candidates: list[dict] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            ticker  = str(item.get("ticker","")).strip().upper()
+            name    = str(item.get("name","")).strip()
+            country = str(item.get("country","")).strip().upper()
+            tier    = int(item.get("tier", 1))
+            if not ticker or not country:
+                continue
+            # Enforce mandate — drop excluded countries even if Claude ignores them
+            if country in _excluded:
+                continue
+            if country not in _allowed_all:
+                continue
+            candidates.append({
+                "ticker":       ticker,
+                "name":         name,
+                "market_cap":   500_000_000,  # placeholder — financials fetched next
+                "exchange":     "",
+                "country":      country,
+                "cik":          None,
+                "discovery_source": "claude_dynamic",
+                "market_tier":  tier,
+            })
+
+        logger.info(
+            "Claude dynamic discovery: %d international candidates (T1=%d T2=%d)",
+            len(candidates),
+            sum(1 for c in candidates if c.get("market_tier") == 1),
+            sum(1 for c in candidates if c.get("market_tier") == 2),
+        )
+        return candidates
+
+    except Exception as e:
+        logger.warning("Dynamic intl discovery failed (%s) — returning empty list", e)
+        return []
 
 
 # ── Main universe screen ──────────────────────────────────────────────────────
@@ -1126,6 +1093,8 @@ async def screen_universe_global(
                         "is_founder_led":      fin.get("is_founder_led"),
                         "founder_name":        fin.get("ceo_name") or "",
                         "is_active":           True,
+                        "discovery_source":    co.get("discovery_source", "nasdaq_api" if not co.get("is_intl") else "claude_dynamic"),
+                        "market_tier":         co.get("market_tier", 1),
                     }
                     metrics = _compute_metrics(ticker, mc, fin.get("shares_outstanding"), fin)
 

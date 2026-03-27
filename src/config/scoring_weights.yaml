@@ -210,7 +210,7 @@ hard_filters:
     - "Financial Services"
     - "Real Estate"
 
-  # Excluded countries
+  # Excluded countries — hard block, never enter universe
   excluded_countries:
     - "CN"   # China mainland
     - "RU"   # Russia
@@ -218,6 +218,38 @@ hard_filters:
     - "KP"   # North Korea
     - "SY"   # Syria
     - "BY"   # Belarus
+
+  # Allowed markets — Tier 1: full access, standard thresholds
+  allowed_markets_tier1:
+    - "US"   # United States
+    - "GB"   # United Kingdom
+    - "SE"   # Sweden
+    - "NO"   # Norway
+    - "DK"   # Denmark
+    - "FI"   # Finland
+    - "DE"   # Germany
+    - "NL"   # Netherlands
+    - "BE"   # Belgium
+    - "CH"   # Switzerland
+    - "AU"   # Australia
+    - "CA"   # Canada
+    - "JP"   # Japan
+    - "SG"   # Singapore
+    - "IL"   # Israel
+
+  # Tier 2: included but require higher min_composite_score (tier2_min_score below)
+  allowed_markets_tier2:
+    - "PL"   # Poland
+    - "FR"   # France
+    - "IT"   # Italy
+    - "ES"   # Spain
+    - "AT"   # Austria
+    - "IE"   # Ireland
+    - "NZ"   # New Zealand
+    - "HK"   # Hong Kong
+
+  # Minimum fit score for Tier 2 companies (stricter than standard min_composite_score)
+  tier2_min_score: 40
 
   # Require profitability — exclude companies with negative net income
   require_profitable: true
