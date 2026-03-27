@@ -1219,6 +1219,24 @@ async def screen_universe_global(
                         return
 
                     mc = fin.get("market_cap_fmp") or None
+                    # If fin didn't include a market cap (e.g. Yahoo timeseries path),
+                    # fetch it directly from FMP profile
+                    if mc is None:
+                        try:
+                            key = settings.ingestion.fmp_api_key
+                            prof_r = await client.get(
+                                "https://financialmodelingprep.com/stable/profile",
+                                params={"symbol": ticker, "apikey": key}, timeout=5)
+                            if prof_r.status_code == 200:
+                                prof_data = prof_r.json()
+                                if prof_data and isinstance(prof_data, list):
+                                    p = prof_data[0]
+                                    raw_mc = p.get("marketCap")
+                                    currency = (p.get("currency") or "USD").upper()
+                                    if raw_mc:
+                                        mc = _to_usd(raw_mc, currency)
+                        except Exception:
+                            pass
                     if mc is None or mc < min_market_cap or mc > max_market_cap:
                         return  # Real market cap unknown or out of range — skip
                     country = fin.get("country") or co.get("country","US") or "US"
