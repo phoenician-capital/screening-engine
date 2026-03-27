@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * { box-sizing: border-box; }
+
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background: #fafaf9;
+    color: #1c1917;
+    margin: 0;
+  }
+
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: #d6d3d1; border-radius: 10px; }
+  ::-webkit-scrollbar-thumb:hover { background: #a8a29e; }
+}
+
+@layer components {
+  .font-display { font-family: 'Cormorant Garamond', Georgia, serif; }
+  .font-serif   { font-family: 'Playfair Display', Georgia, serif; }
+  .font-mono    { font-family: 'JetBrains Mono', monospace; }
+
+  /* Gold rule divider */
+  .gold-rule {
+    @apply w-12 h-px bg-gradient-to-r from-transparent via-gold-400 to-transparent mx-auto;
+  }
+
+  /* Score pill */
+  .score-pill {
+    @apply inline-flex items-center justify-center min-w-[42px] px-2.5 py-0.5 rounded-xs font-mono text-xs font-bold tabular-nums;
+  }
+  .score-pill-green  { @apply bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200; }
+  .score-pill-amber  { @apply bg-amber-50 text-amber-700 ring-1 ring-amber-200; }
+  .score-pill-red    { @apply bg-red-50 text-red-600 ring-1 ring-red-200; }
+
+  /* Stat card */
+  .stat-card {
+    @apply bg-white rounded-sm shadow-luxury border border-stone-100 p-5;
+  }
+
+  /* Table row */
+  .data-row {
+    @apply border-b border-stone-100 hover:bg-stone-50/60 transition-colors duration-100 cursor-pointer;
+  }
+  .data-row.selected {
+    @apply bg-gold-50/40 border-b-gold-200;
+  }
+
+  /* Section label */
+  .section-label {
+    @apply text-[10px] font-semibold tracking-[0.18em] uppercase text-stone-400;
+  }
+
+  /* Tag / badge */
+  .tag {
+    @apply inline-flex items-center px-2 py-0.5 rounded-xs text-[10px] font-semibold tracking-wider uppercase;
+  }
+
+  /* Shimmer loading skeleton */
+  .skeleton {
+    @apply bg-gradient-to-r from-stone-100 via-stone-50 to-stone-100 bg-[length:200%_100%] animate-shimmer rounded;
+  }
+
+  /* Verdict pill */
+  .verdict-research { @apply bg-emerald-600 text-white; }
+  .verdict-watch    { @apply bg-amber-500 text-white; }
+  .verdict-pass     { @apply bg-stone-400 text-white; }
+}
+
+/* Thin gold top border for active nav items */
+.nav-active::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #c9961f, transparent);
+}
+
+/* Subtle line chart sparkline */
+.sparkline { fill: none; stroke-width: 1.5; }

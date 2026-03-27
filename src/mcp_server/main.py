@@ -7,6 +7,7 @@ from __future__ import annotations
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from src.shared.logging import setup_logging
 
@@ -18,6 +19,7 @@ from src.mcp_server.tools.embedder_tool import router as embedder_router
 from src.mcp_server.tools.vector_tool import router as vector_router
 from src.mcp_server.tools.database_tool import router as database_router
 from src.mcp_server.tools.scheduler_tool import router as scheduler_router
+from src.api.router import router as api_router
 
 
 @asynccontextmanager
@@ -32,6 +34,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── CORS — allow React dev server + production nginx ────────────
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # ── Mount tool routers ───────────────────────────────────────────
 app.include_router(sec_router, prefix="/tools/sec_filings", tags=["sec_filings"])
 app.include_router(transcripts_router, prefix="/tools/transcripts", tags=["transcripts"])
@@ -41,6 +52,9 @@ app.include_router(embedder_router, prefix="/tools/embedder", tags=["embedder"])
 app.include_router(vector_router, prefix="/tools/vector", tags=["vector"])
 app.include_router(database_router, prefix="/tools/db", tags=["database"])
 app.include_router(scheduler_router, prefix="/tools/scheduler", tags=["scheduler"])
+
+# ── React frontend API ───────────────────────────────────────────
+app.include_router(api_router)
 
 
 @app.get("/health")

@@ -52,7 +52,7 @@ services:
       - .:/app
     working_dir: /app
 
-  # ── Streamlit Dashboard ──────────────────────────────────────
+  # ── Streamlit Dashboard (legacy) ─────────────────────────────
   dashboard:
     build: .
     command: streamlit run src/dashboard/app.py --server.port 5000 --server.address 0.0.0.0
@@ -72,6 +72,16 @@ services:
     volumes:
       - .:/app
     working_dir: /app
+
+  # ── React Frontend (nginx) ────────────────────────────────────
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mcp-server
 
 volumes:
   pgdata:
