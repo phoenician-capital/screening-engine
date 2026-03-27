@@ -188,12 +188,14 @@ def _compute_dcf_inputs(
     nopat = ebit * 0.78 if ebit and ebit > 0 else None  # EBIT × (1 − 22% tax)
 
     shares = float(metrics.shares_outstanding) if metrics.shares_outstanding and float(metrics.shares_outstanding) > 0 else None
+    market_cap = float(metrics.market_cap_usd) if metrics.market_cap_usd and float(metrics.market_cap_usd) > 0 else None
     base_wacc = 0.09 if market_tier == 1 else 0.11
 
     return {
         "nopat": nopat,
         "shares": shares,
         "price": current_price,
+        "market_cap": market_cap,
         "cagr_ebit_3yr": signals.get("cagr_ebit_3yr"),
         "cagr_ebit_5yr": signals.get("cagr_ebit_5yr"),
         "base_wacc": base_wacc,
@@ -205,14 +207,16 @@ def _run_dcf(assumptions: dict, dcf_inputs: dict) -> dict | None:
     """
     Run 2-stage NOPAT DCF with agent-chosen assumptions.
     Hard caps prevent hallucinated inputs from breaking the model.
-    Returns {intrinsic_per_share, current_price, discount_pct, label} or None.
+    Outputs intrinsic equity value vs current market cap (no per-share needed).
+    Returns {intrinsic_equity, market_cap, discount_pct, label, ...} or None.
     """
     try:
-        nopat  = dcf_inputs.get("nopat")
-        shares = dcf_inputs.get("shares")
-        price  = dcf_inputs.get("price")
+        nopat      = dcf_inputs.get("nopat")
+        market_cap = dcf_inputs.get("market_cap")
+        shares     = dcf_inputs.get("shares")
+        price      = dcf_inputs.get("price")
 
-        if not nopat or nopat <= 0 or not shares or shares <= 0:
+        if not nopat or nopat <= 0:
             return None
 
         g1 = min(0.35, max(-0.05, float(assumptions.get("stage1_growth_pct", 8)) / 100))
@@ -231,10 +235,25 @@ def _run_dcf(assumptions: dict, dcf_inputs: dict) -> dict | None:
         pv2    = tv / (1 + w)**5
 
         intrinsic_equity = pv1 + pv2
-        intrinsic_per_share = intrinsic_equity / shares
 
-        if price and price > 0:
-            discount_pct = (intrinsic_per_share - price) / intrinsic_per_share * 100
+        # Prefer per-share output; fall back to total equity value vs market cap
+        if shares and shares > 0:
+            intrinsic_per_share = intrinsic_equity / shares
+            compare_price = price
+            if compare_price and compare_price > 0:
+                discount_pct = (intrinsic_per_share - compare_price) / intrinsic_per_share * 100
+            elif market_cap and market_cap > 0:
+                compare_price = market_cap / shares
+                discount_pct = (intrinsic_per_share - compare_price) / intrinsic_per_share * 100
+            else:
+                discount_pct = None
+        elif market_cap and market_cap > 0:
+            intrinsic_per_share = None
+            discount_pct = (intrinsic_equity - market_cap) / intrinsic_equity * 100
+        else:
+            return None  # nothing to compare against
+
+        if discount_pct is not None:
             if discount_pct > 20:
                 label = f"trading {discount_pct:.1f}% BELOW intrinsic value — margin of safety"
             elif discount_pct < -20:
@@ -242,12 +261,13 @@ def _run_dcf(assumptions: dict, dcf_inputs: dict) -> dict | None:
             else:
                 label = f"trading near intrinsic value ({discount_pct:+.1f}%)"
         else:
-            discount_pct = None
             label = "current price unavailable"
 
         return {
             "intrinsic_per_share": intrinsic_per_share,
+            "intrinsic_equity": intrinsic_equity,
             "current_price": price,
+            "market_cap": market_cap,
             "discount_pct": discount_pct,
             "label": label,
             "g1": g1, "g2": g2, "w": w,
@@ -556,14 +576,20 @@ async def score_with_analyst_agent(
         if dcf_assumptions and dcf_inputs.get("nopat"):
             dcf_result = _run_dcf(dcf_assumptions, dcf_inputs)
             if dcf_result:
-                iv  = dcf_result["intrinsic_per_share"]
-                cp  = dcf_result["current_price"]
                 lbl = dcf_result["label"]
                 g1  = dcf_result["g1"] * 100
                 g2  = dcf_result["g2"] * 100
                 w   = dcf_result["w"]  * 100
+                iv  = dcf_result.get("intrinsic_per_share")
+                ie  = dcf_result.get("intrinsic_equity")
+                if iv is not None:
+                    iv_str = f"intrinsic ${iv:.2f}/share"
+                elif ie is not None:
+                    iv_str = f"intrinsic equity ${ie/1e9:.2f}B"
+                else:
+                    iv_str = "intrinsic value computed"
                 dcf_result_text = (
-                    f" | DCF: intrinsic ${iv:.2f}/share "
+                    f" | DCF: {iv_str} "
                     f"(Stage1 {g1:.1f}%, terminal {g2:.1f}%, WACC {w:.1f}%) — {lbl}"
                 )
                 if dcf_assumptions.get("reasoning"):
