@@ -6,6 +6,7 @@ better than raw httpx scraping.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 
@@ -74,10 +75,13 @@ Format each item as:
 Return ONLY the JSON array, no other text."""
 
         try:
-            response = await complete_with_search(
-                prompt=prompt,
-                model=settings.llm.primary_model,
-                max_searches=1,
+            response = await asyncio.wait_for(
+                complete_with_search(
+                    prompt=prompt,
+                    model=settings.llm.primary_model,
+                    max_searches=1,
+                ),
+                timeout=45,
             )
             text = response.strip()
             # Strip markdown fences
