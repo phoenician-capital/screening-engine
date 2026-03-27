@@ -14,17 +14,22 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from src.config.settings import settings
 import streamlit as st
 
+from src.dashboard.components.styles import (
+    BG_BASE, BG_CARD, BG_INPUT, BG_CARD_HOVER,
+    BORDER, BORDER_LIGHT, BORDER_FOCUS,
+    GOLD, GOLD_LIGHT, GOLD_BG,
+    GREEN, GREEN_BG, RED, RED_BG, AMBER, AMBER_BG,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, TEXT_DIM,
+    FONT_MONO, FONT_SANS,
+)
+
 # ── Global job state — survives Streamlit session resets and browser refreshes ──
-# Using module-level dict means the background thread can always write to it
-# even if the user refreshes the page mid-run.
 _GLOBAL_JOB: dict = {}
 _GLOBAL_JOB_LOCK = threading.Lock()
 
 
 def _run(coro, timeout: int = None):
-    """Run a coroutine in a completely isolated thread with its own event loop.
-    No timeout — runs until completion regardless of duration."""
-    import threading
+    """Run a coroutine in a completely isolated thread with its own event loop."""
     result_holder = [None]
     error_holder  = [None]
     done_event    = threading.Event()
@@ -54,7 +59,6 @@ def _run(coro, timeout: int = None):
 
     t = threading.Thread(target=_target, daemon=True)
     t.start()
-    # No timeout — wait forever until the run completes
     done_event.wait()
     if error_holder[0]:
         raise error_holder[0]
@@ -63,53 +67,9 @@ def _run(coro, timeout: int = None):
 
 def _engine_factory():
     from sqlalchemy.pool import NullPool
-    # NullPool: never hold idle connections — opens fresh connection per operation
-    # This avoids the "executor shutdown" error when connections go idle during
-    # the long screen_universe_global fetch (10+ minutes)
-    engine = create_async_engine(
-        settings.db.dsn,
-        echo=False,
-        poolclass=NullPool,
-    )
+    engine = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
     factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
     return engine, factory
-
-
-def _card(content: str) -> str:
-    return (
-        f'<div style="background:#ffffff;border:1px solid #e8eaed;border-radius:8px;'
-        f'padding:24px 28px;margin-bottom:16px">{content}</div>'
-    )
-
-
-def _step_row(number: str, label: str, status: str, detail: str = "") -> str:
-    colors = {
-        "waiting": ("#9ca3af", "#f9fafb", "Waiting"),
-        "running": ("#d97706", "#fffbeb", "Running..."),
-        "done":    ("#059669", "#f0fdf4", "Done"),
-        "error":   ("#dc2626", "#fef2f2", "Error"),
-    }
-    color, bg, badge_text = colors.get(status, colors["waiting"])
-    detail_html = (
-        f'<div style="color:#6b7280;font-size:0.78rem;margin-top:4px">{detail}</div>'
-        if detail else ""
-    )
-    return f"""
-<div style="display:flex;align-items:flex-start;gap:16px;padding:14px 0;
-            border-bottom:1px solid #f3f4f6">
-  <div style="width:28px;height:28px;border-radius:50%;
-              background:{bg};border:1px solid {color}33;
-              display:flex;align-items:center;justify-content:center;
-              font-size:0.75rem;font-weight:700;color:{color};
-              flex-shrink:0;margin-top:1px">{number}</div>
-  <div style="flex:1">
-    <div style="font-size:0.88rem;font-weight:500;color:#111827">{label}</div>
-    {detail_html}
-  </div>
-  <div style="background:{bg};color:{color};border:1px solid {color}33;
-              padding:2px 10px;border-radius:4px;font-size:0.72rem;font-weight:600;
-              white-space:nowrap;margin-top:2px">{badge_text}</div>
-</div>"""
 
 
 # ── Async runners ───────────────────────────────────────────────────────────────
@@ -176,37 +136,168 @@ async def _get_top_n() -> list[dict]:
         await engine.dispose()
 
 
-# ── Page ────────────────────────────────────────────────────────────────────────
+# ── UI Components ────────────────────────────────────────────────────────────────
+
+def _step_html(number: str, label: str, status: str, detail: str = "") -> str:
+    status_cfg = {
+        "waiting": (TEXT_DIM,   BG_INPUT,  TEXT_MUTED,  "WAITING"),
+        "running": (GOLD,       GOLD_BG,   GOLD,        "RUNNING"),
+        "done":    (GREEN,      GREEN_BG,  GREEN,       "COMPLETE"),
+        "error":   (RED,        RED_BG,    RED,         "ERROR"),
+    }
+    dot_color, dot_bg, badge_color, badge_text = status_cfg.get(status, status_cfg["waiting"])
+
+    pulse = ' class="ph-step-active"' if status == "running" else ""
+    detail_html = (
+        f'<div style="color:{TEXT_MUTED};font-size:0.75rem;margin-top:3px;'
+        f'font-family:{FONT_SANS};line-height:1.4">{detail}</div>'
+        if detail else ""
+    )
+    return f"""
+<div style="display:flex;align-items:flex-start;gap:16px;padding:16px 24px;
+            border-bottom:1px solid {TEXT_DIM}40;position:relative">
+  <div{pulse} style="width:32px;height:32px;border-radius:50%;
+              background:{dot_bg};border:1px solid {dot_color}40;
+              display:flex;align-items:center;justify-content:center;
+              font-size:0.72rem;font-weight:700;color:{dot_color};
+              flex-shrink:0;margin-top:1px;font-family:{FONT_MONO}">{number}</div>
+  <div style="flex:1;min-width:0">
+    <div style="font-size:0.86rem;font-weight:600;color:{TEXT_PRIMARY};
+                letter-spacing:0.01em">{label}</div>
+    {detail_html}
+  </div>
+  <div style="background:{dot_bg};color:{badge_color};border:1px solid {badge_color}30;
+              padding:3px 11px;border-radius:3px;font-size:0.64rem;font-weight:700;
+              white-space:nowrap;letter-spacing:0.08em;font-family:{FONT_SANS}">{badge_text}</div>
+</div>"""
+
+
+def _score_tag(score, inverted=False):
+    if inverted:
+        c  = RED   if score >= 60 else (AMBER if score >= 35 else GREEN)
+        bg = RED_BG if score >= 60 else (AMBER_BG if score >= 35 else GREEN_BG)
+    else:
+        c  = GREEN   if score >= 60 else (AMBER if score >= 40 else RED)
+        bg = GREEN_BG if score >= 60 else (AMBER_BG if score >= 40 else RED_BG)
+    return (
+        f'<span style="background:{bg};color:{c};border:1px solid {c}30;'
+        f'padding:3px 10px;border-radius:3px;font-size:0.74rem;font-weight:700;'
+        f'font-family:{FONT_MONO};font-variant-numeric:tabular-nums">{score:.0f}</span>'
+    )
+
+
+def _fmt_cap(v):
+    if v is None: return "—"
+    if v >= 1e9:  return f"${v/1e9:.1f}B"
+    if v >= 1e6:  return f"${v/1e6:.0f}M"
+    return f"${v:,.0f}"
+
+
+def _render_results_table(rows: list[dict]) -> None:
+    if not rows:
+        return
+
+    headers = ["#", "TICKER", "COMPANY", "EXCHANGE", "MKT CAP", "FIT", "RISK", "SCORE"]
+    th_style = (
+        f"text-align:left;padding:11px 16px;"
+        f"font-size:0.62rem;font-weight:700;text-transform:uppercase;letter-spacing:0.10em;"
+        f"color:{TEXT_MUTED};background:{BG_INPUT};border-bottom:1px solid {BORDER};white-space:nowrap"
+    )
+    th_r_style = th_style.replace("text-align:left", "text-align:right")
+
+    TH = "".join(
+        f'<th style="{th_r_style if i >= 4 else th_style}">{h}</th>'
+        for i, h in enumerate(headers)
+    )
+
+    rows_html = ""
+    for i, r in enumerate(rows):
+        bg  = BG_CARD if i % 2 == 0 else f"{BG_INPUT}88"
+        rn  = r.get("rank") or (i + 1)
+        is_top = isinstance(rn, int) and rn <= 3
+        rank_html = (
+            f'<span style="background:linear-gradient(135deg,{GOLD},{GOLD_LIGHT});color:#000;'
+            f'width:26px;height:26px;border-radius:50%;display:inline-flex;'
+            f'align-items:center;justify-content:center;font-size:0.70rem;font-weight:800;'
+            f'font-family:{FONT_MONO}">{rn}</span>'
+            if is_top else
+            f'<span style="color:{TEXT_MUTED};font-size:0.80rem;font-weight:600;'
+            f'font-family:{FONT_MONO}">{rn}</span>'
+        )
+        td = f"padding:11px 16px;border-bottom:1px solid {TEXT_DIM}40"
+        rows_html += (
+            f'<tr style="background:{bg};transition:background 0.1s" '
+            f'onmouseover="this.style.background=\'{BG_CARD_HOVER}\'" '
+            f'onmouseout="this.style.background=\'{bg}\'">'
+            f'<td style="{td}">{rank_html}</td>'
+            f'<td style="{td};font-weight:700;font-size:0.88rem;color:{TEXT_PRIMARY};'
+            f'font-family:{FONT_MONO};letter-spacing:0.02em">{r["ticker"]}</td>'
+            f'<td style="{td};font-size:0.82rem;color:{TEXT_SECONDARY};max-width:200px;'
+            f'overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{r.get("name","")}</td>'
+            f'<td style="{td};font-size:0.75rem;color:{TEXT_MUTED}">{r.get("exchange","")}</td>'
+            f'<td style="{td};text-align:right;font-size:0.82rem;color:{TEXT_SECONDARY};'
+            f'font-family:{FONT_MONO}">{_fmt_cap(r.get("market_cap"))}</td>'
+            f'<td style="{td};text-align:right">{_score_tag(r["fit_score"])}</td>'
+            f'<td style="{td};text-align:right">{_score_tag(r["risk_score"], inverted=True)}</td>'
+            f'<td style="{td};text-align:right">{_score_tag(r["rank_score"])}</td>'
+            f'</tr>'
+        )
+
+    st.markdown(
+        f'<div style="background:{BG_CARD};border:1px solid {BORDER};border-radius:8px;'
+        f'overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.25)">'
+        f'<table style="width:100%;border-collapse:collapse">'
+        f'<thead><tr>{TH}</tr></thead>'
+        f'<tbody>{rows_html}</tbody>'
+        f'</table></div>',
+        unsafe_allow_html=True,
+    )
+
+
+# ── Page ─────────────────────────────────────────────────────────────────────────
 
 def render() -> None:
-    st.markdown("""
-    <div style="margin-bottom:24px">
-      <div style="font-size:1.35rem;font-weight:700;color:#111827;letter-spacing:-0.01em">
+    # Page header
+    st.markdown(f"""
+    <div style="margin-bottom:32px;padding-bottom:20px;border-bottom:1px solid {BORDER}">
+      <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;
+                  letter-spacing:0.14em;color:{GOLD};margin-bottom:8px">
+        SCREENING ENGINE
+      </div>
+      <div style="font-size:1.6rem;font-weight:700;color:{TEXT_PRIMARY};
+                  letter-spacing:-0.02em;line-height:1.2">
         Run Screening
       </div>
-      <div style="font-size:0.84rem;color:#6b7280;margin-top:4px">
-        Discover, ingest, and score companies in one step.
+      <div style="font-size:0.85rem;color:{TEXT_MUTED};margin-top:6px">
+        Discover, ingest, and score companies in a single automated workflow.
       </div>
     </div>
     """, unsafe_allow_html=True)
 
-    # ── Controls ───────────────────────────────────────────────────────────────
-    c1, c2 = st.columns([1, 4])
+    # ── Controls ─────────────────────────────────────────────────────────────
+    c1, c2, c3 = st.columns([2, 1, 3])
     with c1:
-        run_clicked = st.button("Run Screening", key="run_btn", use_container_width=True)
+        run_clicked = st.button("Execute Screening Run", key="run_btn", use_container_width=True)
     with c2:
-        max_co = st.number_input("Max companies to screen", min_value=5, max_value=200,
-                                 value=20, step=5, label_visibility="collapsed", key="screen_max")
+        max_co = st.number_input(
+            "Max companies", min_value=5, max_value=500,
+            value=20, step=5, label_visibility="collapsed", key="screen_max"
+        )
+    with c3:
+        st.markdown(
+            f'<div style="padding:7px 0;font-size:0.77rem;color:{TEXT_MUTED}">'
+            f'<span style="color:{GOLD};font-weight:600">↑</span> '
+            f'Global universe · AI Analyst Agent · 20 parallel streams</div>',
+            unsafe_allow_html=True
+        )
 
-    mode, theme, sim_ticker = "screener", "", ""
+    st.markdown(f'<div style="height:8px"></div>', unsafe_allow_html=True)
 
-    # ── Background job state — use global dict, survives page refreshes ──────────
-    # Always read from _GLOBAL_JOB so we can track a run even if session resets
+    # ── Background job state ─────────────────────────────────────────────────
     job = _GLOBAL_JOB if _GLOBAL_JOB else None
 
-    # ── Start new job ──────────────────────────────────────────────────────────
+    # ── Start new job ────────────────────────────────────────────────────────
     if run_clicked and not (job and not job.get("done")):
-        # Don't start a second run if one is already in progress
         _GLOBAL_JOB.clear()
         _GLOBAL_JOB.update({
             "step": 1, "done": False, "error": None,
@@ -220,23 +311,23 @@ def render() -> None:
             try:
                 t0 = _GLOBAL_JOB["t0"]
                 _GLOBAL_JOB["step"] = 1
-                tickers = _run(_discover_and_ingest(max_co, mode, theme, sim_ticker))
+                tickers = _run(_discover_and_ingest(max_co, "screener", "", ""))
                 _GLOBAL_JOB["tickers"] = tickers
-                _GLOBAL_JOB["d1"] = f"Found {len(tickers)} candidates in {time.time()-t0:.0f}s"
-                _GLOBAL_JOB["d2"] = "Financials from FMP + Yahoo Finance"
+                _GLOBAL_JOB["d1"] = f"{len(tickers)} candidates · {time.time()-t0:.0f}s"
+                _GLOBAL_JOB["d2"] = "FMP + Yahoo Finance timeseries"
                 _GLOBAL_JOB["step"] = 2
 
                 t2 = time.time()
                 _GLOBAL_JOB["step"] = 3
                 scored = _run(_score(tickers if tickers else None))
                 _GLOBAL_JOB["scored"] = len(scored) if isinstance(scored, list) else 0
-                _GLOBAL_JOB["d3"] = f"{_GLOBAL_JOB['scored']} companies scored in {time.time()-t2:.1f}s"
+                _GLOBAL_JOB["d3"] = f"{_GLOBAL_JOB['scored']} companies · {time.time()-t2:.1f}s"
 
                 t3 = time.time()
                 _GLOBAL_JOB["step"] = 4
                 top_n = _run(_get_top_n())
                 _GLOBAL_JOB["top_n"] = top_n
-                _GLOBAL_JOB["d4"] = f"Top {len(top_n)} saved in {time.time()-t3:.1f}s"
+                _GLOBAL_JOB["d4"] = f"Top {len(top_n)} persisted · {time.time()-t3:.1f}s"
 
                 import datetime as _dt
                 _GLOBAL_JOB["done"] = True
@@ -249,76 +340,105 @@ def render() -> None:
         t.start()
         st.rerun()
 
-    # ── Poll running job ───────────────────────────────────────────────────────
+    # ── Poll running job ─────────────────────────────────────────────────────
     job = _GLOBAL_JOB if _GLOBAL_JOB else None
     if job and not job.get("done"):
-        step  = job.get("step", 1)
-        s1    = "done" if step > 1 else "running"
-        s2    = "done" if step > 2 else ("running" if step == 2 else "waiting")
-        s3    = "done" if step > 3 else ("running" if step == 3 else "waiting")
-        s4    = "done" if step > 4 else ("running" if step == 4 else "waiting")
+        step    = job.get("step", 1)
+        s1      = "done" if step > 1 else "running"
+        s2      = "done" if step > 2 else ("running" if step == 2 else "waiting")
+        s3      = "done" if step > 3 else ("running" if step == 3 else "waiting")
+        s4      = "done" if step > 4 else ("running" if step == 4 else "waiting")
         elapsed = int(time.time() - job.get("t0", time.time()))
 
+        st.markdown(f"""
+        <div style="background:{BG_CARD};border:1px solid {BORDER};border-radius:8px;
+                    overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.3);margin-bottom:20px">
+          <div style="padding:16px 24px 12px;border-bottom:1px solid {BORDER};
+                      display:flex;align-items:center;justify-content:space-between">
+            <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;
+                        letter-spacing:0.12em;color:{GOLD}">RUN IN PROGRESS</div>
+            <div style="font-size:0.72rem;color:{TEXT_MUTED};font-family:{FONT_MONO}">{elapsed}s elapsed</div>
+          </div>
+          {_step_html("1", "Discover Companies", s1, job.get("d1") or "Scanning EDGAR universe...")}
+          {_step_html("2", "Ingest Market Data", s2, job.get("d2") or ("Fetching FMP + Yahoo Finance..." if step >= 2 else ""))}
+          {_step_html("3", "Score &amp; Rank", s3, job.get("d3") or ("Running AI Analyst Agent..." if step >= 3 else ""))}
+          {_step_html("4", "Persist Results", s4, job.get("d4") or ("Writing to database..." if step >= 4 else ""))}
+        </div>
+        """, unsafe_allow_html=True)
+
         st.markdown(
-            _card(
-                "<div style='font-size:0.7rem;font-weight:600;text-transform:uppercase;"
-                "letter-spacing:0.09em;color:#9ca3af;margin-bottom:4px'>PROGRESS</div>"
-                + _step_row("1", "Discover companies",          s1, job.get("d1") or "Scanning EDGAR universe...")
-                + _step_row("2", "Ingest data (filings, news)", s2, job.get("d2") or ("Fetching financials..." if step >= 2 else ""))
-                + _step_row("3", "Score and rank",               s3, job.get("d3") or ("Scoring..." if step >= 3 else ""))
-                + _step_row("4", "Save top results to database", s4, job.get("d4") or ("Saving..." if step >= 4 else ""))
-            ),
+            f'<div style="font-size:0.75rem;color:{TEXT_MUTED};text-align:center;'
+            f'padding:4px">Auto-refreshing every 5 seconds</div>',
             unsafe_allow_html=True,
         )
-        st.caption(f"Running... {elapsed}s elapsed")
         time.sleep(5)
         st.rerun()
         return
 
-    # ── Show completed job ─────────────────────────────────────────────────────
+    # ── Show completed job ───────────────────────────────────────────────────
     if job and job.get("done"):
         if job.get("error"):
-            st.error(f"Screening failed: {job['error']}")
+            st.markdown(f"""
+            <div style="background:{RED_BG};border:1px solid {RED}40;border-radius:8px;
+                        padding:20px 24px;margin-bottom:20px">
+              <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;
+                          letter-spacing:0.10em;color:{RED};margin-bottom:6px">RUN FAILED</div>
+              <div style="font-size:0.84rem;color:{TEXT_SECONDARY};font-family:{FONT_MONO}">{job['error']}</div>
+            </div>
+            """, unsafe_allow_html=True)
         else:
-            top_n = job.get("top_n", [])
-            total = int(time.time() - job.get("t0", time.time()))
-            st.markdown(
-                f'<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;'
-                f'padding:16px 24px;margin-bottom:16px;display:flex;align-items:center;gap:16px">'
-                f'<div style="font-size:0.85rem;color:#065f46;font-weight:500">'
-                f'Complete — {len(job.get("tickers",[]))} screened, top {len(top_n)} saved.'
-                f'</div><div style="margin-left:auto;font-size:0.78rem;color:#6b7280">'
-                f'{total}s total</div></div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown(
-                _card(
-                    "<div style='font-size:0.7rem;font-weight:600;text-transform:uppercase;"
-                    "letter-spacing:0.09em;color:#9ca3af;margin-bottom:4px'>PROGRESS</div>"
-                    + _step_row("1", "Discover companies",          "done", job.get("d1",""))
-                    + _step_row("2", "Ingest data (filings, news)", "done", job.get("d2",""))
-                    + _step_row("3", "Score and rank",               "done", job.get("d3",""))
-                    + _step_row("4", "Save top results to database", "done", job.get("d4",""))
-                ),
-                unsafe_allow_html=True,
-            )
-        # Keep job state in global so results persist after page refresh
-        pass
+            tickers = job.get("tickers", [])
+            top_n   = job.get("top_n", [])
+            total   = int(time.time() - job.get("t0", time.time()))
+            completed_at = job.get("completed_at", "")
 
-    # ── Show results ──────────────────────────────────────────────────────────
+            st.markdown(f"""
+            <div style="background:{GREEN_BG};border:1px solid {GREEN}30;border-radius:8px;
+                        padding:18px 24px;margin-bottom:20px;
+                        display:flex;align-items:center;justify-content:space-between">
+              <div>
+                <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;
+                            letter-spacing:0.10em;color:{GREEN};margin-bottom:6px">RUN COMPLETE</div>
+                <div style="font-size:0.84rem;color:{TEXT_PRIMARY};font-weight:500">
+                  {len(tickers)} companies discovered &nbsp;·&nbsp;
+                  {job.get('scored',0)} scored &nbsp;·&nbsp;
+                  Top {len(top_n)} saved
+                </div>
+              </div>
+              <div style="text-align:right">
+                <div style="font-size:0.72rem;color:{TEXT_MUTED};font-family:{FONT_MONO}">{total}s total</div>
+                <div style="font-size:0.70rem;color:{TEXT_MUTED};margin-top:2px">{completed_at}</div>
+              </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # Progress recap
+            st.markdown(f"""
+            <div style="background:{BG_CARD};border:1px solid {BORDER};border-radius:8px;
+                        overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.2);margin-bottom:24px">
+              <div style="padding:14px 24px 10px;border-bottom:1px solid {BORDER}">
+                <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;
+                            letter-spacing:0.12em;color:{TEXT_MUTED}">PIPELINE SUMMARY</div>
+              </div>
+              {_step_html("1", "Discover Companies",  "done", job.get("d1",""))}
+              {_step_html("2", "Ingest Market Data",  "done", job.get("d2",""))}
+              {_step_html("3", "Score &amp; Rank",    "done", job.get("d3",""))}
+              {_step_html("4", "Persist Results",     "done", job.get("d4",""))}
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ── Show results table ───────────────────────────────────────────────────
     if job and job.get("done") and job.get("top_n") and not run_clicked:
         top_n = job.get("top_n", [])
-        st.markdown(
-            '<div style="margin-top:24px;margin-bottom:12px;font-size:0.7rem;font-weight:600;'
-            'text-transform:uppercase;letter-spacing:0.09em;color:#9ca3af">Last Run Results</div>',
-            unsafe_allow_html=True,
-        )
+        st.markdown(f"""
+        <div style="display:flex;align-items:center;justify-content:space-between;
+                    margin-bottom:14px">
+          <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;
+                      letter-spacing:0.12em;color:{TEXT_MUTED}">TOP RANKED COMPANIES</div>
+          <div style="font-size:0.73rem;color:{TEXT_MUTED}">Full analysis on Results page</div>
+        </div>
+        """, unsafe_allow_html=True)
         _render_results_table(top_n)
-        st.markdown(
-            '<div style="margin-top:10px;font-size:0.78rem;color:#9ca3af">'
-            'View full details on the Results page.</div>',
-            unsafe_allow_html=True,
-        )
 
     elif not run_clicked and not (job and job.get("top_n")):
         try:
@@ -330,76 +450,20 @@ def render() -> None:
             pass
 
         if not (job and job.get("top_n")):
-            st.markdown("""
-            <div style="background:#ffffff;border:1px solid #e8eaed;border-radius:8px;
-                        padding:48px 28px;text-align:center;margin-top:8px">
-              <div style="font-size:0.9rem;font-weight:500;color:#374151;margin-bottom:6px">
-                No screening has been run yet
+            st.markdown(f"""
+            <div style="background:{BG_CARD};border:1px solid {BORDER};border-radius:8px;
+                        padding:72px 28px;text-align:center;
+                        box-shadow:0 4px 24px rgba(0,0,0,0.2)">
+              <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;
+                          letter-spacing:0.14em;color:{GOLD};margin-bottom:16px">READY</div>
+              <div style="font-size:1.1rem;font-weight:600;color:{TEXT_PRIMARY};
+                          margin-bottom:10px;letter-spacing:-0.01em">
+                No screening has been run
               </div>
-              <div style="font-size:0.82rem;color:#9ca3af">
-                Click Run Screening. Leave the box empty for a broad market sweep,
-                type a ticker to find similar companies, or type a theme.
+              <div style="font-size:0.84rem;color:{TEXT_MUTED};max-width:420px;margin:0 auto;
+                          line-height:1.6">
+                Click <span style="color:{GOLD};font-weight:600">Execute Screening Run</span> to start.
+                The engine will discover, ingest, and score the global universe automatically.
               </div>
             </div>
             """, unsafe_allow_html=True)
-
-
-def _render_results_table(rows: list[dict]) -> None:
-    def fmt_cap(v):
-        if v is None: return "—"
-        if v >= 1e9:  return f"${v/1e9:.1f}B"
-        if v >= 1e6:  return f"${v/1e6:.0f}M"
-        return f"${v:,.0f}"
-
-    def score_tag(score, inverted=False):
-        if inverted:
-            c = "#dc2626" if score >= 60 else ("#d97706" if score >= 35 else "#059669")
-        else:
-            c = "#059669" if score >= 60 else ("#d97706" if score >= 40 else "#dc2626")
-        bg = {"#059669": "#f0fdf4", "#d97706": "#fffbeb", "#dc2626": "#fef2f2"}[c]
-        return (
-            f'<span style="background:{bg};color:{c};border:1px solid {c}33;'
-            f'padding:2px 9px;border-radius:4px;font-size:0.76rem;font-weight:700;'
-            f'font-variant-numeric:tabular-nums">{score:.0f}</span>'
-        )
-
-    headers = ["Rank", "Ticker", "Company", "Exchange", "Mkt Cap", "Fit", "Risk", "Score"]
-    TH = "".join(
-        f'<th style="text-align:{"right" if i > 3 else "left"};padding:10px 14px;'
-        f'font-size:0.68rem;font-weight:600;text-transform:uppercase;letter-spacing:0.07em;'
-        f'color:#9ca3af;background:#f9fafb;border-bottom:1px solid #e8eaed">{h}</th>'
-        for i, h in enumerate(headers)
-    )
-
-    rows_html = ""
-    for i, r in enumerate(rows):
-        bg = "#ffffff" if i % 2 == 0 else "#fafafa"
-        rn = r.get("rank") or (i + 1)
-        rank_badge = (
-            f'<span style="background:#111827;color:#fff;width:24px;height:24px;'
-            f'border-radius:50%;display:inline-flex;align-items:center;justify-content:center;'
-            f'font-size:0.72rem;font-weight:700">{rn}</span>'
-            if isinstance(rn, int) and rn <= 3 else
-            f'<span style="color:#6b7280;font-size:0.82rem;font-weight:600">{rn}</span>'
-        )
-        rows_html += (
-            f'<tr style="background:{bg}">'
-            f'<td style="padding:10px 14px;border-bottom:1px solid #f3f4f6">{rank_badge}</td>'
-            f'<td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;font-weight:700;font-size:0.88rem;color:#111827">{r["ticker"]}</td>'
-            f'<td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;font-size:0.83rem;color:#374151">{r.get("name","")}</td>'
-            f'<td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;font-size:0.78rem;color:#9ca3af">{r.get("exchange","")}</td>'
-            f'<td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;text-align:right;font-size:0.83rem;color:#374151;font-variant-numeric:tabular-nums">{fmt_cap(r.get("market_cap"))}</td>'
-            f'<td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;text-align:right">{score_tag(r["fit_score"])}</td>'
-            f'<td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;text-align:right">{score_tag(r["risk_score"], inverted=True)}</td>'
-            f'<td style="padding:10px 14px;border-bottom:1px solid #f3f4f6;text-align:right">{score_tag(r["rank_score"])}</td>'
-            f'</tr>'
-        )
-
-    st.markdown(
-        f'<div style="background:#ffffff;border:1px solid #e8eaed;border-radius:8px;overflow:hidden">'
-        f'<table style="width:100%;border-collapse:collapse">'
-        f'<thead><tr>{TH}</tr></thead>'
-        f'<tbody>{rows_html}</tbody>'
-        f'</table></div>',
-        unsafe_allow_html=True,
-    )

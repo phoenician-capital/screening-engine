@@ -43,21 +43,30 @@ def _save(data: dict) -> None:
 
 
 def _section(title: str, subtitle: str = "") -> None:
-    sub = f'<div style="font-size:0.81rem;color:#6b7280;margin-top:3px">{subtitle}</div>' if subtitle else ""
+    from src.dashboard.components.styles import GOLD, BORDER, TEXT_PRIMARY, TEXT_MUTED
+    sub = f'<div style="font-size:0.78rem;color:{TEXT_MUTED};margin-top:4px">{subtitle}</div>' if subtitle else ""
     st.markdown(
-        f'<div style="margin:28px 0 16px;padding-bottom:10px;border-bottom:1px solid #e8eaed">'
-        f'<div style="font-size:0.72rem;font-weight:700;text-transform:uppercase;'
-        f'letter-spacing:0.09em;color:#374151">{title}</div>{sub}</div>',
+        f'<div style="margin:32px 0 16px;padding-bottom:12px;border-bottom:1px solid {BORDER}">'
+        f'<div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;'
+        f'letter-spacing:0.12em;color:{GOLD}">{title}</div>{sub}</div>',
         unsafe_allow_html=True,
     )
 
 
 def render() -> None:
-    st.markdown("""
-    <div style="margin-bottom:28px">
-      <div style="font-size:1.35rem;font-weight:700;color:#111827;letter-spacing:-0.01em">Settings</div>
-      <div style="font-size:0.84rem;color:#6b7280;margin-top:4px">
-        Configure screening criteria. Changes take effect on the next run.
+    from src.dashboard.components.styles import GOLD, BORDER, BG_CARD, TEXT_PRIMARY, TEXT_MUTED, BG_INPUT
+    st.markdown(f"""
+    <div style="margin-bottom:32px;padding-bottom:20px;border-bottom:1px solid {BORDER}">
+      <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;
+                  letter-spacing:0.14em;color:{GOLD};margin-bottom:8px">
+        CONFIGURATION
+      </div>
+      <div style="font-size:1.6rem;font-weight:700;color:{TEXT_PRIMARY};
+                  letter-spacing:-0.02em;line-height:1.2">
+        Filters &amp; Settings
+      </div>
+      <div style="font-size:0.85rem;color:{TEXT_MUTED};margin-top:6px">
+        Configure screening criteria and scoring weights. Changes take effect on the next run.
       </div>
     </div>
     """, unsafe_allow_html=True)
@@ -70,12 +79,12 @@ def render() -> None:
     # ── 1. Hard Filters ───────────────────────────────────────────────────────
     _section("Hard Filters", "Companies failing any active filter are excluded before scoring begins")
 
-    st.markdown('<div style="background:#ffffff;border:1px solid #e8eaed;border-radius:8px;padding:24px 28px">', unsafe_allow_html=True)
+    st.markdown(f'<div style="background:{BG_CARD};border:1px solid {BORDER};border-radius:8px;padding:24px 28px">', unsafe_allow_html=True)
 
     hc1, hc2, hc3 = st.columns(3)
 
     with hc1:
-        st.markdown('<div style="font-size:0.72rem;font-weight:600;color:#374151;margin-bottom:12px">Market Cap</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="font-size:0.72rem;font-weight:600;color:{TEXT_MUTED};margin-bottom:12px;text-transform:uppercase;letter-spacing:0.08em">Market Cap</div>', unsafe_allow_html=True)
         min_cap = st.number_input(
             "Min ($M)",
             min_value=0, max_value=5000,
@@ -90,7 +99,7 @@ def render() -> None:
         )
 
     with hc2:
-        st.markdown('<div style="font-size:0.72rem;font-weight:600;color:#374151;margin-bottom:12px">Financial Thresholds</div>', unsafe_allow_html=True)
+        st.markdown(f'<div style="font-size:0.72rem;font-weight:600;color:{TEXT_MUTED};margin-bottom:12px;text-transform:uppercase;letter-spacing:0.08em">Financial Thresholds</div>', unsafe_allow_html=True)
         leverage_on = st.checkbox(
             "Leverage cap (Net Debt / EBITDA)",
             value=True,

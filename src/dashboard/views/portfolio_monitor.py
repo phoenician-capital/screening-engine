@@ -9,9 +9,7 @@ import concurrent.futures
 
 import streamlit as st
 
-from src.dashboard.components.styles import apply_theme, section_header, BG_CARD, BORDER, TEXT_PRIMARY, TEXT_MUTED, GREEN, AMBER, RED
-
-GOLD = AMBER  # alias
+from src.dashboard.components.styles import apply_theme, section_header, BG_CARD, BG_INPUT, BORDER, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED, GREEN, AMBER, RED, GOLD, FONT_MONO, FONT_SANS
 
 
 def _run(coro, timeout: int = 120):
@@ -179,13 +177,21 @@ def _signal_badge(signal_type: str) -> str:
 def render() -> None:
     apply_theme()
 
-    st.markdown(
-        f'<h1 style="margin:0;color:{TEXT_PRIMARY}">Portfolio Monitor</h1>'
-        f'<div style="color:{TEXT_MUTED};font-size:0.78rem;margin-top:2px">'
-        f'Live intelligence feed for your 19 portfolio holdings.</div>',
-        unsafe_allow_html=True,
-    )
-    st.markdown('<div style="height:16px"></div>', unsafe_allow_html=True)
+    st.markdown(f"""
+    <div style="margin-bottom:32px;padding-bottom:20px;border-bottom:1px solid {BORDER}">
+      <div style="font-size:0.62rem;font-weight:700;text-transform:uppercase;
+                  letter-spacing:0.14em;color:{GOLD};margin-bottom:8px">
+        PORTFOLIO INTELLIGENCE
+      </div>
+      <div style="font-size:1.6rem;font-weight:700;color:{TEXT_PRIMARY};
+                  letter-spacing:-0.02em;line-height:1.2">
+        Portfolio Monitor
+      </div>
+      <div style="font-size:0.85rem;color:{TEXT_MUTED};margin-top:6px">
+        Live intelligence feed for your 19 portfolio holdings.
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # Manual scan button
     c1, c2 = st.columns([5, 1])
