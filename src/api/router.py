@@ -472,6 +472,66 @@ async def get_portfolio():
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# PORTFOLIO SIGNALS — IR events + news per holding
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.post("/portfolio/scan-ir")
+async def scan_ir():
+    """Run IR monitor scan across all active portfolio holdings."""
+    engine, factory = _make_session()
+    try:
+        async with factory() as session:
+            from src.ingestion.workers.ir_monitor_worker import IRMonitorWorker
+            worker = IRMonitorWorker()
+            new_events = await worker.run(session)
+            return {"ok": True, "new_events": len(new_events), "events": new_events}
+    finally:
+        await engine.dispose()
+
+
+@router.get("/portfolio/{ticker}/signals")
+async def get_ticker_signals(ticker: str, news_limit: int = Query(5, le=20)):
+    """Return IR events + recent news for a single portfolio holding."""
+    engine, factory = _make_session()
+    try:
+        async with factory() as session:
+            from src.db.repositories.document_repo import DocumentRepository
+            from src.ingestion.sources.news.client import NewsClient
+
+            doc_repo = DocumentRepository(session)
+
+            # IR events from DB
+            ir_docs = await doc_repo.get_by_ticker(ticker, doc_type="ir_event", limit=10)
+            ir_events = [
+                {
+                    "title":      d.title,
+                    "url":        d.source_url,
+                    "event_type": d.meta.get("event_type") if d.meta else None,
+                    "event_date": d.published_at.date().isoformat() if d.published_at else None,
+                    "snippet":    d.raw_text,
+                }
+                for d in ir_docs
+            ]
+
+            # Live news via Perplexity
+            news = []
+            try:
+                client = NewsClient()
+                articles = await client.search(
+                    query=f"{ticker} investor news earnings",
+                    tickers=[ticker],
+                    limit=news_limit,
+                )
+                news = articles
+            except Exception as e:
+                logger.warning("News fetch failed for %s: %s", ticker, e)
+
+            return {"ticker": ticker, "ir_events": ir_events, "news": news}
+    finally:
+        await engine.dispose()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # INSIDER ACTIVITY
 # ══════════════════════════════════════════════════════════════════════════════
 

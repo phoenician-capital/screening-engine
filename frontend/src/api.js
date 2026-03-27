@@ -27,6 +27,8 @@ export const api = {
   screeningStatus: () => get('/screening/status'),
 
   portfolio: () => get('/portfolio'),
+  scanIR: () => post('/portfolio/scan-ir', {}),
+  tickerSignals: (ticker, newsLimit = 5) => get(`/portfolio/${ticker}/signals?news_limit=${newsLimit}`),
   insiders: (days = 30) => get(`/insiders?days=${days}`),
 
   settings: () => get('/settings'),
