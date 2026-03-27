@@ -477,31 +477,104 @@ async def get_portfolio():
 
 @router.post("/portfolio/scan-ir")
 async def scan_ir():
-    """Run IR monitor scan across all active portfolio holdings."""
+    """Run IR monitor scan + news fetch across all active portfolio holdings."""
     engine, factory = _make_session()
     try:
         async with factory() as session:
+            from src.db.repositories.portfolio_repo import PortfolioRepository
+            from src.db.models.document import Document
+            from src.db.repositories.document_repo import DocumentRepository
             from src.ingestion.workers.ir_monitor_worker import IRMonitorWorker
+            from src.shared.llm.client_factory import complete
+            from src.prompts import load_prompt
+            from src.ingestion.sources.news.client import NewsClient
+            import datetime as _dt
+
+            # 1. IR events
             worker = IRMonitorWorker()
             new_events = await worker.run(session)
-            return {"ok": True, "new_events": len(new_events), "events": new_events}
+
+            # 2. News — fetch for all holdings and store, replacing stale articles
+            portfolio_repo = PortfolioRepository(session)
+            doc_repo = DocumentRepository(session)
+            holdings = await portfolio_repo.get_active()
+            news_client = NewsClient()
+            system_prompt = load_prompt("ingestion/news_search_system.j2")
+
+            async def _fetch_news(holding):
+                try:
+                    prompt = load_prompt(
+                        "ingestion/news_search.j2",
+                        query=f"{holding.ticker} {holding.name or ''} investor news earnings",
+                        tickers=[holding.ticker],
+                        date_from=None,
+                        limit=5,
+                    )
+                    raw = await complete(prompt, model="sonar", system=system_prompt,
+                                        max_tokens=2000, temperature=0.1)
+                    articles = news_client._parse_articles(raw)[:5]
+
+                    # Delete existing news articles for this ticker (refresh)
+                    from sqlalchemy import delete as _del
+                    from src.db.models.document import Document as _Doc
+                    await session.execute(
+                        _del(_Doc).where(
+                            _Doc.ticker == holding.ticker,
+                            _Doc.doc_type == "news_article",
+                        )
+                    )
+
+                    for article in articles:
+                        if not article.get("title"):
+                            continue
+                        doc = Document(
+                            ticker=holding.ticker,
+                            doc_type="news_article",
+                            source="perplexity",
+                            source_url=article.get("url"),
+                            title=article["title"][:500],
+                            raw_text=article.get("snippet", "")[:1000],
+                            published_at=None,
+                            meta={"published_at": article.get("published_at")},
+                        )
+                        session.add(doc)
+                    await session.flush()
+                    return len(articles)
+                except Exception as e:
+                    logger.warning("News fetch failed for %s: %s", holding.ticker, e)
+                    return 0
+
+            # Run news fetches concurrently (max 5 at a time)
+            sem = asyncio.Semaphore(5)
+            async def _guarded(h):
+                async with sem:
+                    return await _fetch_news(h)
+
+            news_counts = await asyncio.gather(*[_guarded(h) for h in holdings], return_exceptions=True)
+            total_news = sum(n for n in news_counts if isinstance(n, int))
+
+            await session.commit()
+            return {
+                "ok": True,
+                "new_ir_events": len(new_events),
+                "news_articles": total_news,
+            }
     finally:
         await engine.dispose()
 
 
 @router.get("/portfolio/{ticker}/signals")
-async def get_ticker_signals(ticker: str, news_limit: int = Query(5, le=20)):
-    """Return IR events + recent news for a single portfolio holding."""
+async def get_ticker_signals(ticker: str):
+    """Return IR events + news for a single portfolio holding — both read from DB."""
     engine, factory = _make_session()
     try:
         async with factory() as session:
             from src.db.repositories.document_repo import DocumentRepository
-            from src.ingestion.sources.news.client import NewsClient
-
             doc_repo = DocumentRepository(session)
 
-            # IR events from DB
-            ir_docs = await doc_repo.get_by_ticker(ticker, doc_type="ir_event", limit=10)
+            ir_docs   = await doc_repo.get_by_ticker(ticker, doc_type="ir_event",    limit=10)
+            news_docs = await doc_repo.get_by_ticker(ticker, doc_type="news_article", limit=5)
+
             ir_events = [
                 {
                     "title":      d.title,
@@ -512,25 +585,15 @@ async def get_ticker_signals(ticker: str, news_limit: int = Query(5, le=20)):
                 }
                 for d in ir_docs
             ]
-
-            # Live news via Perplexity (sonar = fast, sonar-deep-research = thorough)
-            news = []
-            try:
-                from src.shared.llm.client_factory import complete
-                from src.prompts import load_prompt
-                prompt = load_prompt(
-                    "ingestion/news_search.j2",
-                    query=f"{ticker} investor news earnings",
-                    tickers=[ticker],
-                    date_from=None,
-                    limit=news_limit,
-                )
-                system = load_prompt("ingestion/news_search_system.j2")
-                raw = await complete(prompt, model="sonar", system=system, max_tokens=2000, temperature=0.1)
-                client = NewsClient()
-                news = client._parse_articles(raw)[:news_limit]
-            except Exception as e:
-                logger.warning("News fetch failed for %s: %s", ticker, e)
+            news = [
+                {
+                    "title":        d.title,
+                    "url":          d.source_url,
+                    "published_at": d.meta.get("published_at") if d.meta else None,
+                    "snippet":      d.raw_text,
+                }
+                for d in news_docs
+            ]
 
             return {"ticker": ticker, "ir_events": ir_events, "news": news}
     finally:

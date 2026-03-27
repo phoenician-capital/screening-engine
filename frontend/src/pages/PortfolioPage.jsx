@@ -215,7 +215,7 @@ export default function PortfolioPage() {
         <div className="flex items-center gap-3">
           {scanResult && (
             <span className="text-xs text-emerald-600 font-semibold">
-              {scanResult.new_events} new IR events found
+              {scanResult.new_ir_events} IR events · {scanResult.news_articles} news saved
             </span>
           )}
           {scanError && (
