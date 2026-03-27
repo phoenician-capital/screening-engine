@@ -311,9 +311,9 @@ async def start_portfolio_scan():
         _SCREENING_JOB.clear()
         _SCREENING_JOB.update({
             "running": True, "done": False, "error": None,
-            "step": 2, "step_label": "Scoring portfolio with AI Analyst Agent",
+            "step": 1, "step_label": "Fetching portfolio data",
             "tickers_found": 0, "scored": 0, "top_n": [],
-            "d1": "Portfolio scan — skipping discovery", "d2": "", "d3": "", "d4": "",
+            "d1": "", "d2": "", "d3": "", "d4": "",
             "t0": time.time(), "elapsed": 0,
         })
 
@@ -334,9 +334,33 @@ async def start_portfolio_scan():
                     await eng.dispose()
 
             tickers = _run_sync(_get_tickers())
+
+            # Ingest any portfolio tickers that have no metrics yet
+            async def _ingest_missing():
+                eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
+                fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+                try:
+                    async with fac() as sess:
+                        from src.db.repositories import MetricRepository
+                        from src.orchestration.discovery.universe_expander import UniverseExpander
+                        metric_repo = MetricRepository(sess)
+                        expander = UniverseExpander(sess)
+                        missing = []
+                        for t in tickers:
+                            m = await metric_repo.get_latest(t)
+                            if not m:
+                                missing.append(t)
+                        if missing:
+                            _SCREENING_JOB["d1"] = f"Ingesting {len(missing)} new holdings…"
+                            await expander.ingest_new_tickers(missing)
+                        return len(missing)
+                finally:
+                    await eng.dispose()
+
+            n_ingested = _run_sync(_ingest_missing())
             _SCREENING_JOB.update({
                 "tickers_found": len(tickers),
-                "d1": f"{len(tickers)} portfolio holdings · discovery skipped",
+                "d1": f"{len(tickers)} holdings · {n_ingested} ingested",
                 "step": 2, "step_label": "Scoring with AI Analyst Agent",
             })
 
