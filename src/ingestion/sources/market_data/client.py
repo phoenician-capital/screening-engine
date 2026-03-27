@@ -1112,6 +1112,7 @@ async def screen_universe_global(
     concurrency: int = 10,
     exclude_tickers: set[str] | None = None,
     preselected_tickers: list[str] | None = None,
+    candidate_map: dict[str, dict] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Build global investable universe.
@@ -1129,11 +1130,14 @@ async def screen_universe_global(
             logger.info("Fast path: fetching financials for %d pre-selected tickers", len(preselected_tickers))
             print(f"Fetching financials for {len(preselected_tickers)} Claude-selected candidates...", flush=True)
 
-            # Build a combined candidate map from both US and intl lists
-            us_raw   = await _get_us_candidates(client, min_market_cap, max_market_cap)
-            intl_raw = await _get_intl_candidates(client, min_market_cap, max_market_cap)
-            all_map  = {c["ticker"]: {**c, "is_intl": False} for c in us_raw}
-            all_map.update({c["ticker"]: {**c, "is_intl": True} for c in intl_raw})
+            # Use pre-built candidate map if provided — avoids redundant FMP + intl calls
+            if candidate_map:
+                all_map = candidate_map
+            else:
+                us_raw   = await _get_us_candidates(client, min_market_cap, max_market_cap)
+                intl_raw = await _get_intl_candidates(client, min_market_cap, max_market_cap)
+                all_map  = {c["ticker"]: {**c, "is_intl": False} for c in us_raw}
+                all_map.update({c["ticker"]: {**c, "is_intl": True} for c in intl_raw})
 
             fmp_sem = asyncio.Semaphore(15)
             llm_sem = asyncio.Semaphore(8)

@@ -195,9 +195,10 @@ class UniverseExpander:
         logger.info("Claude pre-selected %d candidates for financial ingestion", len(preselected))
 
         # Step 4: Fetch financials only for pre-selected tickers
-        # Build lookup maps
-        us_map   = {c["ticker"]: c for c in us_raw}
-        intl_map = {c["ticker"]: c for c in intl_raw}
+        # Build lookup maps — passed to screen_universe_global to avoid re-fetching
+        us_map   = {c["ticker"]: {**c, "is_intl": False} for c in us_raw}
+        intl_map = {c["ticker"]: {**c, "is_intl": True}  for c in intl_raw}
+        combined_map = {**us_map, **intl_map}
 
         results = await screen_universe_global(
             min_market_cap=min_cap,
@@ -208,6 +209,7 @@ class UniverseExpander:
             include_us=True,
             include_intl=True,
             preselected_tickers=preselected,
+            candidate_map=combined_map,
         )
 
         # Use psycopg2 (sync) for DB writes — avoids asyncpg event loop issues
@@ -226,6 +228,15 @@ class UniverseExpander:
             )
             conn.autocommit = False
             cur = conn.cursor()
+
+            # Drop anything whose real market cap is outside the target range
+            results = [
+                r for r in results
+                if r.get("company", {}).get("market_cap_usd") is None
+                or min_cap <= float(r["company"]["market_cap_usd"]) <= max_cap
+            ]
+            logger.info("After market cap filter (%s–%s): %d companies",
+                        f"${min_cap/1e6:.0f}M", f"${max_cap/1e9:.1f}B", len(results))
 
             for r in results:
                 ticker = r.get("company", {}).get("ticker", "?")
