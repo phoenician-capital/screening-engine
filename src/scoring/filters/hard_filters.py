@@ -48,6 +48,7 @@ class HardFilterEngine:
         self.excluded_countries    = set(c.upper() for c in hard.get("excluded_countries", [
             "CN", "RU", "IR", "KP", "SY", "BY"
         ]))
+        self.excluded_tickers      = set(t.upper() for t in hard.get("excluded_tickers", []))
         self.max_leverage          = float(hard.get("max_leverage", 5.0))
         self.min_gross_margin      = float(hard.get("min_gross_margin", 0.15))
         self.min_avg_daily_volume  = float(hard.get("min_avg_daily_volume_usd", 0))
@@ -75,7 +76,12 @@ class HardFilterEngine:
         is_etf: bool = False,
         net_income: float | None = None,
         company_name: str | None = None,
+        ticker: str | None = None,
     ) -> FilterResult:
+
+        # 0. Explicit ticker exclusion
+        if ticker and ticker.upper() in self.excluded_tickers:
+            return FilterResult(passed=False, reason=f"Explicitly excluded ticker: {ticker}")
 
         # 0a. ETF / fund exclusion
         if is_etf:

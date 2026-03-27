@@ -168,6 +168,7 @@ class ScoringPipeline:
 
                 # 4. Hard filter
                 filter_result = self.hard_filter.check(
+                    ticker=company.ticker,
                     gics_sector=company.gics_sector,
                     gics_sub_industry=company.gics_sub_industry,
                     market_cap=float(metrics.market_cap_usd) if metrics.market_cap_usd else None,

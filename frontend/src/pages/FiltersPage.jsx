@@ -1,26 +1,32 @@
 import { useState, useEffect } from 'react'
-import { motion } from 'framer-motion'
-import { CheckCircle } from 'lucide-react'
+import { motion, AnimatePresence } from 'framer-motion'
+import { CheckCircle, X, Plus, Shield, TrendingDown, Globe, Building2, Filter } from 'lucide-react'
 import { useApi } from '../hooks/useApi'
 import { api } from '../api'
 import { Skeleton } from '../components/Skeleton'
 
-function Section({ title, sub, children }) {
+/* ─── primitives ─────────────────────────────────────────────── */
+
+function Section({ icon: Icon, title, sub, children }) {
   return (
     <div className="mb-8">
-      <div className="mb-4 pb-3 border-b border-stone-150">
-        <div className="text-xs font-semibold tracking-[0.14em] uppercase text-gold-600">{title}</div>
-        {sub && <div className="text-xs text-stone-400 mt-1">{sub}</div>}
+      <div className="mb-4 pb-3 border-b border-stone-150 flex items-center gap-2.5">
+        {Icon && <Icon size={13} className="text-gold-500 flex-shrink-0" />}
+        <div>
+          <div className="text-xs font-semibold tracking-[0.14em] uppercase text-gold-600">{title}</div>
+          {sub && <div className="text-xs text-stone-400 mt-0.5">{sub}</div>}
+        </div>
       </div>
       {children}
     </div>
   )
 }
 
-function NumberField({ label, value, onChange, min, max, step = 1, suffix }) {
+function NumberField({ label, hint, value, onChange, min, max, step = 1, suffix }) {
   return (
     <div>
-      <label className="block text-xs text-stone-500 mb-1.5">{label}</label>
+      <label className="block text-xs font-medium text-stone-600 mb-1">{label}</label>
+      {hint && <div className="text-[10px] text-stone-400 mb-1.5">{hint}</div>}
       <div className="flex items-center gap-2">
         <input
           type="number"
@@ -36,12 +42,12 @@ function NumberField({ label, value, onChange, min, max, step = 1, suffix }) {
   )
 }
 
-function Toggle({ label, checked, onChange }) {
+function Toggle({ label, hint, checked, onChange }) {
   return (
-    <label className="flex items-center gap-3 cursor-pointer group">
+    <label className="flex items-start gap-3 cursor-pointer group">
       <div
         onClick={() => onChange(!checked)}
-        className={`w-9 h-5 rounded-full transition-colors relative flex-shrink-0 ${
+        className={`mt-0.5 w-9 h-5 rounded-full transition-colors relative flex-shrink-0 ${
           checked ? 'bg-stone-800' : 'bg-stone-200'
         }`}
       >
@@ -49,29 +55,207 @@ function Toggle({ label, checked, onChange }) {
           checked ? 'translate-x-4' : 'translate-x-0.5'
         }`} />
       </div>
-      <span className="text-sm text-stone-600 group-hover:text-stone-800 transition-colors">{label}</span>
+      <div>
+        <span className="text-sm text-stone-700 group-hover:text-stone-900 transition-colors">{label}</span>
+        {hint && <div className="text-[10px] text-stone-400 mt-0.5">{hint}</div>}
+      </div>
     </label>
   )
 }
+
+/* ─── chip list (sectors / countries / tickers) ──────────────── */
+
+const SECTOR_OPTIONS = [
+  'Energy', 'Utilities', 'Financials', 'Financial Services', 'Real Estate',
+  'Materials', 'Industrials', 'Consumer Defensive', 'Consumer Cyclical',
+  'Consumer Discretionary', 'Healthcare', 'Health Care', 'Technology',
+  'Information Technology', 'Communication Services',
+]
+
+const COUNTRY_OPTIONS = [
+  { code: 'CN', label: 'China' },
+  { code: 'RU', label: 'Russia' },
+  { code: 'IR', label: 'Iran' },
+  { code: 'KP', label: 'North Korea' },
+  { code: 'SY', label: 'Syria' },
+  { code: 'BY', label: 'Belarus' },
+  { code: 'TR', label: 'Turkey' },
+  { code: 'IN', label: 'India' },
+  { code: 'BR', label: 'Brazil' },
+  { code: 'MX', label: 'Mexico' },
+  { code: 'ID', label: 'Indonesia' },
+  { code: 'AR', label: 'Argentina' },
+  { code: 'NG', label: 'Nigeria' },
+  { code: 'PK', label: 'Pakistan' },
+]
+
+function ChipList({ items, onRemove, color = 'stone' }) {
+  const colors = {
+    stone: 'bg-stone-100 text-stone-700 ring-stone-200',
+    red:   'bg-red-50 text-red-700 ring-red-200',
+    amber: 'bg-amber-50 text-amber-700 ring-amber-200',
+  }
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {items.map(item => (
+        <span
+          key={item}
+          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-medium ring-1 ${colors[color]}`}
+        >
+          {item}
+          <button
+            onClick={() => onRemove(item)}
+            className="hover:opacity-60 transition-opacity ml-0.5"
+          >
+            <X size={9} strokeWidth={2.5} />
+          </button>
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function AddFromDropdown({ label, options, existing, onAdd, placeholder }) {
+  const [open, setOpen] = useState(false)
+  const available = options.filter(o => {
+    const val = typeof o === 'object' ? o.code : o
+    return !existing.includes(val)
+  })
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium
+                   border border-dashed border-stone-300 rounded text-stone-500
+                   hover:border-stone-400 hover:text-stone-700 transition-colors"
+      >
+        <Plus size={10} strokeWidth={2.5} /> {label}
+      </button>
+      <AnimatePresence>
+        {open && available.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -4 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -4 }}
+            transition={{ duration: 0.12 }}
+            className="absolute z-20 mt-1 w-56 bg-white border border-stone-200 rounded-sm shadow-xl overflow-y-auto max-h-52"
+          >
+            {available.map(o => {
+              const val   = typeof o === 'object' ? o.code : o
+              const label = typeof o === 'object' ? `${o.label} (${o.code})` : o
+              return (
+                <button
+                  key={val}
+                  onClick={() => { onAdd(val); setOpen(false) }}
+                  className="w-full text-left px-3 py-2 text-xs text-stone-700 hover:bg-stone-50 transition-colors"
+                >
+                  {label}
+                </button>
+              )
+            })}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+function AddTextInput({ placeholder, onAdd }) {
+  const [val, setVal] = useState('')
+  const submit = () => {
+    const v = val.trim().toUpperCase()
+    if (v) { onAdd(v); setVal('') }
+  }
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        value={val}
+        onChange={e => setVal(e.target.value)}
+        onKeyDown={e => e.key === 'Enter' && submit()}
+        placeholder={placeholder}
+        className="w-32 py-1.5 px-2.5 text-xs font-mono bg-white border border-stone-200 rounded-xs
+                   focus:outline-none focus:border-gold-400 placeholder:text-stone-300 uppercase"
+      />
+      <button
+        onClick={submit}
+        className="inline-flex items-center gap-1 px-2.5 py-1.5 text-[11px] font-medium bg-stone-900 text-white rounded hover:bg-stone-800 transition-colors"
+      >
+        <Plus size={10} /> Add
+      </button>
+    </div>
+  )
+}
+
+/* ─── rule card ──────────────────────────────────────────────── */
+
+function RuleCard({ rule, onRemove }) {
+  return (
+    <div className="flex items-start gap-3 px-4 py-3 bg-white border border-stone-150 rounded-sm shadow-luxury">
+      <div className="flex-1 min-w-0">
+        <div className="text-xs font-semibold text-stone-700">{rule.label}</div>
+        <div className="text-[11px] text-stone-400 mt-0.5">{rule.description}</div>
+      </div>
+      <button
+        onClick={onRemove}
+        className="flex-shrink-0 mt-0.5 text-stone-300 hover:text-red-400 transition-colors"
+      >
+        <X size={13} />
+      </button>
+    </div>
+  )
+}
+
+/* ─── main page ──────────────────────────────────────────────── */
+
+const DEFAULT_EXCLUDED_SECTORS  = ['Energy', 'Utilities', 'Financials', 'Financial Services', 'Real Estate']
+const DEFAULT_EXCLUDED_COUNTRIES = ['CN', 'RU', 'IR', 'KP', 'SY', 'BY']
 
 export default function FiltersPage() {
   const { data: cfg, loading } = useApi(api.settings)
   const [saved, setSaved]      = useState(false)
   const [local, setLocal]      = useState(null)
 
+  // Editable exclusion lists — stored locally, saved to hard_filters
+  const [exSectors,   setExSectors]   = useState(DEFAULT_EXCLUDED_SECTORS)
+  const [exCountries, setExCountries] = useState(DEFAULT_EXCLUDED_COUNTRIES)
+  const [exTickers,   setExTickers]   = useState([])
+
   useEffect(() => {
-    if (cfg) setLocal(JSON.parse(JSON.stringify(cfg)))
+    if (cfg) {
+      const copy = JSON.parse(JSON.stringify(cfg))
+      setLocal(copy)
+
+      const hf = copy.hard_filters ?? {}
+      if (Array.isArray(hf.excluded_gics_sectors))
+        setExSectors(hf.excluded_gics_sectors.filter(s => isNaN(+s)))
+      if (Array.isArray(hf.excluded_countries))
+        setExCountries(hf.excluded_countries.map(c => c.toUpperCase()))
+      if (Array.isArray(hf.excluded_tickers))
+        setExTickers(hf.excluded_tickers.map(t => t.toUpperCase()))
+    }
   }, [cfg])
 
-  const hard  = local?.hard_filters ?? {}
-  const rank  = local?.ranking ?? {}
+  const hard = local?.hard_filters ?? {}
+  const rank = local?.ranking ?? {}
 
-  const setHard = (key, val) => setLocal(l => ({ ...l, hard_filters: { ...l.hard_filters, [key]: val } }))
-  const setRank = (key, val) => setLocal(l => ({ ...l, ranking: { ...l.ranking, [key]: val } }))
+  const setHard = (key, val) =>
+    setLocal(l => ({ ...l, hard_filters: { ...l.hard_filters, [key]: val } }))
+  const setRank = (key, val) =>
+    setLocal(l => ({ ...l, ranking: { ...l.ranking, [key]: val } }))
 
   const save = async () => {
+    const payload = {
+      ...local,
+      hard_filters: {
+        ...local.hard_filters,
+        excluded_gics_sectors: exSectors,
+        excluded_countries:    exCountries,
+        excluded_tickers:      exTickers,
+      },
+    }
     try {
-      await api.saveSettings(local)
+      await api.saveSettings(payload)
       setSaved(true)
       setTimeout(() => setSaved(false), 2500)
     } catch (e) {
@@ -82,7 +266,7 @@ export default function FiltersPage() {
   if (loading || !local) return (
     <div className="px-10 pt-10 pb-16">
       <div className="section-label mb-2">Configuration</div>
-      <div className="font-display text-4xl font-light text-stone-800 mb-8">Filters &amp; Settings</div>
+      <div className="font-display text-4xl font-light text-stone-800 mb-8">Rules &amp; Filters</div>
       <Skeleton className="h-96 rounded-sm" />
     </div>
   )
@@ -93,9 +277,7 @@ export default function FiltersPage() {
       <div className="flex items-end justify-between mb-10">
         <div>
           <div className="section-label mb-2">Configuration</div>
-          <h2 className="font-display text-4xl font-light text-stone-800">
-            Filters &amp; Settings
-          </h2>
+          <h2 className="font-display text-4xl font-light text-stone-800">Rules &amp; Filters</h2>
           <p className="text-sm text-stone-400 mt-2">Changes take effect on the next screening run.</p>
         </div>
         <motion.button
@@ -109,86 +291,148 @@ export default function FiltersPage() {
         </motion.button>
       </div>
 
-      {/* Hard Filters */}
-      <Section title="Hard Filters" sub="Companies failing any active filter are excluded before scoring.">
-        <div className="bg-white border border-stone-150 rounded-sm shadow-luxury p-6">
-          <div className="grid grid-cols-3 gap-6">
+      {/* ── 1. Sector Exclusions ── */}
+      <Section icon={Building2} title="Sector Exclusions" sub="Any company in these GICS sectors is excluded before scoring.">
+        <div className="bg-white border border-stone-150 rounded-sm shadow-luxury p-5 space-y-4">
+          <ChipList
+            items={exSectors}
+            onRemove={s => setExSectors(v => v.filter(x => x !== s))}
+            color="stone"
+          />
+          <AddFromDropdown
+            label="Add sector"
+            options={SECTOR_OPTIONS}
+            existing={exSectors}
+            onAdd={s => setExSectors(v => [...v, s])}
+          />
+        </div>
+      </Section>
+
+      {/* ── 2. Country Exclusions ── */}
+      <Section icon={Globe} title="Country Exclusions" sub="Companies domiciled in excluded countries are disqualified.">
+        <div className="bg-white border border-stone-150 rounded-sm shadow-luxury p-5 space-y-4">
+          <ChipList
+            items={exCountries}
+            onRemove={c => setExCountries(v => v.filter(x => x !== c))}
+            color="red"
+          />
+          <AddFromDropdown
+            label="Add country"
+            options={COUNTRY_OPTIONS}
+            existing={exCountries}
+            onAdd={c => setExCountries(v => [...v, c])}
+          />
+        </div>
+      </Section>
+
+      {/* ── 3. Ticker Exclusions ── */}
+      <Section icon={Filter} title="Ticker Exclusions" sub="Specific companies to exclude regardless of score.">
+        <div className="bg-white border border-stone-150 rounded-sm shadow-luxury p-5 space-y-4">
+          {exTickers.length > 0
+            ? <ChipList items={exTickers} onRemove={t => setExTickers(v => v.filter(x => x !== t))} color="amber" />
+            : <p className="text-xs text-stone-400">No ticker exclusions set.</p>
+          }
+          <AddTextInput
+            placeholder="e.g. TSLA"
+            onAdd={t => { if (!exTickers.includes(t)) setExTickers(v => [...v, t]) }}
+          />
+        </div>
+      </Section>
+
+      {/* ── 4. Hard Filter Thresholds ── */}
+      <Section icon={Shield} title="Hard Filter Thresholds" sub="Companies failing any threshold are excluded before scoring.">
+        <div className="bg-white border border-stone-150 rounded-sm shadow-luxury p-6 space-y-6">
+
+          <div className="grid grid-cols-2 gap-6">
             <NumberField
               label="Min Market Cap"
-              value={Math.round((hard.hard_min_market_cap ?? 100_000_000) / 1e6)}
-              onChange={v => setHard('hard_min_market_cap', v * 1e6)}
+              hint="Raise to focus on larger, more liquid names"
+              value={Math.round((hard.min_market_cap_usd ?? 250_000_000) / 1e6)}
+              onChange={v => setHard('min_market_cap_usd', v * 1e6)}
               min={0} max={5000}
               suffix="$M"
             />
             <NumberField
               label="Max Market Cap"
-              value={Math.round((hard.hard_max_market_cap ?? 10_000_000_000) / 1e9)}
-              onChange={v => setHard('hard_max_market_cap', v * 1e9)}
+              hint="Cap to stay under-followed (sweet spot ≤ $10B)"
+              value={Math.round((hard.max_market_cap_usd ?? 10_000_000_000) / 1e9)}
+              onChange={v => setHard('max_market_cap_usd', v * 1e9)}
               min={1} max={200}
               suffix="$B"
             />
             <NumberField
-              label="Max ND / EBITDA"
+              label="Max Leverage"
+              hint="Net debt / EBITDA ceiling"
               value={hard.max_leverage ?? 5.0}
               onChange={v => setHard('max_leverage', v)}
               min={0} max={20} step={0.5}
-              suffix="×"
+              suffix="× ND/EBITDA"
+            />
+            <NumberField
+              label="Min Gross Margin"
+              hint="Quality floor — excludes commodity-like businesses"
+              value={Math.round((hard.min_gross_margin ?? 0.15) * 100)}
+              onChange={v => setHard('min_gross_margin', v / 100)}
+              min={0} max={80}
+              suffix="%"
+            />
+            <NumberField
+              label="Min Avg Daily Volume"
+              hint="Liquidity floor to ensure tradeable positions"
+              value={Math.round((hard.min_avg_daily_volume_usd ?? 250_000) / 1e3)}
+              onChange={v => setHard('min_avg_daily_volume_usd', v * 1e3)}
+              min={0} max={100_000}
+              suffix="$K/day"
+            />
+            <NumberField
+              label="Min Fit Score"
+              hint="Minimum composite score to appear in results"
+              value={hard.min_composite_score ?? 15}
+              onChange={v => setHard('min_composite_score', v)}
+              min={0} max={80}
+              suffix="/ 100"
             />
           </div>
 
-          <div className="mt-6 pt-5 border-t border-stone-100 space-y-3">
+          <div className="pt-4 border-t border-stone-100 space-y-4">
             <Toggle
-              label="Exclude financial intermediaries (banks, insurers)"
-              checked={hard.exclude_financials !== false}
-              onChange={v => setHard('exclude_financials', v)}
-            />
-            <Toggle
-              label="Exclude commodities and capital-intensive cyclicals"
-              checked={hard.exclude_commodities !== false}
-              onChange={v => setHard('exclude_commodities', v)}
-            />
-            <Toggle
-              label="Require minimum gross margin threshold"
-              checked={hard.require_gross_margin !== false}
-              onChange={v => setHard('require_gross_margin', v)}
+              label="Require profitability"
+              hint="Exclude companies with negative net income"
+              checked={hard.require_profitable !== false}
+              onChange={v => setHard('require_profitable', v)}
             />
           </div>
         </div>
       </Section>
 
-      {/* Ranking */}
-      <Section title="Ranking" sub="Controls how final rank scores are computed.">
+      {/* ── 5. Ranking Formula ── */}
+      <Section icon={TrendingDown} title="Ranking Formula" sub="Controls how final rank scores are computed from fit and risk.">
         <div className="bg-white border border-stone-150 rounded-sm shadow-luxury p-6">
           <div className="grid grid-cols-3 gap-6">
             <NumberField
-              label="Top N results to persist"
+              label="Fit score weight"
+              hint="Remainder goes to risk penalty"
+              value={Math.round((rank.fit_weight ?? 0.70) * 100)}
+              onChange={v => setRank('fit_weight', v / 100)}
+              min={40} max={95}
+              suffix="%"
+            />
+            <NumberField
+              label="Top N to persist"
+              hint="Limit results stored per run"
               value={rank.top_n_results ?? 50}
               onChange={v => setRank('top_n_results', v)}
               min={5} max={500}
             />
             <NumberField
-              label="Fit score weight %"
-              value={rank.fit_weight_pct ?? 70}
-              onChange={v => setRank('fit_weight_pct', v)}
-              min={50} max={95}
+              label="Feedback reject decay"
+              hint="Score penalty per analyst reject (%)"
+              value={Math.round((rank.feedback_decay_per_reject ?? 0.02) * 100)}
+              onChange={v => setRank('feedback_decay_per_reject', v / 100)}
+              min={0} max={20}
               suffix="%"
             />
-            <NumberField
-              label="Min fit score to rank"
-              value={rank.min_fit_score ?? 30}
-              onChange={v => setRank('min_fit_score', v)}
-              min={0} max={80}
-            />
           </div>
-        </div>
-      </Section>
-
-      {/* Raw YAML preview */}
-      <Section title="Raw Configuration" sub="Full scoring_weights.yaml — read-only preview.">
-        <div className="bg-stone-950 rounded-sm p-5 overflow-auto max-h-80">
-          <pre className="text-[11px] font-mono text-stone-400 leading-relaxed whitespace-pre">
-            {JSON.stringify(local, null, 2)}
-          </pre>
         </div>
       </Section>
     </div>
