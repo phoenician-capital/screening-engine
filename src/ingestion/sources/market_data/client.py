@@ -957,12 +957,36 @@ async def _get_intl_candidates(client: httpx.AsyncClient,
             max_searches=4,   # enough to pull from index lists + cross-check
         )
         text  = raw.strip()
-        start = text.find("[")
-        end   = text.rfind("]")
-        if start == -1 or end == -1:
-            raise ValueError("No JSON array in response")
+        items = None
 
-        items = _json.loads(text[start:end+1])
+        # Try direct parse first
+        try:
+            start = text.find("[")
+            end   = text.rfind("]")
+            if start != -1 and end != -1:
+                items = _json.loads(text[start:end+1])
+        except (_json.JSONDecodeError, Exception):
+            pass
+
+        # Fallback: ask Claude to re-extract the JSON array from its own response
+        if items is None:
+            logger.info("Intl discovery JSON parse failed — asking Claude to re-extract array")
+            clean = await complete_with_search(
+                prompt=(
+                    "Extract only the JSON array from the text below. "
+                    "Return ONLY the JSON array, nothing else.\n\n" + text[:6000]
+                ),
+                model=_settings.llm.primary_model,
+                max_tokens=4000,
+                temperature=0.0,
+                max_searches=0,
+            )
+            clean = clean.strip()
+            start = clean.find("[")
+            end   = clean.rfind("]")
+            if start == -1 or end == -1:
+                raise ValueError("No JSON array in response after re-extraction")
+            items = _json.loads(clean[start:end+1])
         candidates: list[dict] = []
         for item in items:
             if not isinstance(item, dict):
