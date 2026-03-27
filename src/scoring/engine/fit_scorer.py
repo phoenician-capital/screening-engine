@@ -85,7 +85,9 @@ class FitScorer:
         # Called directly as async — parallelism handled by asyncio.gather in pipeline
         try:
             agent_criteria = await score_with_analyst_agent(
-                company, metrics, historical, portfolio_avg, sector_medians, feedback_context
+                company, metrics, historical, portfolio_avg, sector_medians, feedback_context,
+                current_price=current_price,
+                market_tier=getattr(company, "market_tier", 1) or 1,
             )
         except Exception as e:
             logger.warning("Agent scoring failed for %s: %s", company.ticker, e)

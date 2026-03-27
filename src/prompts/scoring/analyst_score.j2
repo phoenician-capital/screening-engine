@@ -1,4 +1,4 @@
-Conduct a full investment assessment for the following company. Use web search to understand the business and find recent developments. Then score it on every dimension with complete analytical freedom.
+Conduct a full investment assessment for the following company. Use all 4 web searches strategically, then score with complete analytical freedom.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 COMPANY
@@ -11,7 +11,7 @@ Market Cap:  {{ market_cap }}
 Description: {{ description }}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-5-YEAR FINANCIAL HISTORY
+5-YEAR FINANCIAL HISTORY + TREND SIGNALS
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 {{ financial_history }}
 
@@ -31,17 +31,33 @@ PHOENICIAN PORTFOLIO CONTEXT
 {{ portfolio_context }}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-YOUR ASSESSMENT
+RESEARCH — USE YOUR 4 SEARCHES STRATEGICALLY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Use your 2 web searches wisely:
-- Search 1: understand the actual business model, competitive position, and moat
-- Search 2: recent developments — earnings commentary, management changes, competitive threats
+Search 1 — MOAT & BUSINESS MODEL
+Search for: "[company name] competitive advantage business model market position"
+Goal: Understand what makes this business defensible (or not). What is the actual moat — switching costs, network effects, pricing power, IP? Who are the competitors and is the company gaining or losing share?
 
-Then score each dimension 0–100 with full analytical freedom. No thresholds, no rules — use judgment.
+Search 2 — RECENT TRAJECTORY
+Search for: "[company name] earnings guidance 2024 2025 management commentary"
+Goal: Is the business accelerating or deteriorating? What did management say on the last earnings call? Any guidance changes, margin surprises, or strategic pivots?
+
+Search 3 — BEAR CASE
+Search for: "[company name] risks concerns short sellers analyst downgrade competition"
+Goal: Actively hunt for the bad news. What do bears say? Are there structural threats, customer concentration issues, accounting concerns, competitive disruption? This search must change your priors — if it doesn't, you didn't search hard enough.
+
+Search 4 — VALUATION & CAPITAL ALLOCATION
+Search for: "[company name] valuation multiples peers insider buying buyback capital allocation"
+Goal: How does the stock trade vs sector peers? Any insider activity? What is management doing with cash — buybacks, M&A, dividends? Is the stock cheap or expensive relative to quality?
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DIMENSION SCORING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Score each dimension 0–100. Reference your research AND the TREND SIGNALS block specifically.
 
 DIMENSION 1 — BUSINESS QUALITY
-Assess: competitive moat from your research, gross margin level and multi-year trend, operating leverage, pricing power evidence, revenue growth consistency vs. volatility, NI growing faster than revenue (margin expansion). What makes this business defensible or not?
+Assess: competitive moat from your research, gross margin level and multi-year trend (pay close attention to TREND SIGNALS — expanding or contracting?), operating leverage, pricing power evidence. What makes this business defensible or not? A business with contracting gross margins despite revenue growth has no pricing power — score harshly.
 
 DIMENSION 2 — UNIT ECONOMICS
 Assess: FCF/Net Income ratio (is NI real cash?), FCF yield, capex intensity, whether FCF is growing faster than revenue, working capital dynamics. Is this asset-light or capital-hungry?
@@ -50,19 +66,71 @@ DIMENSION 3 — CAPITAL RETURNS
 Assess: ROIC level and multi-year trend. Is the company earning above its cost of capital? Is the moat widening (rising ROIC) or eroding (falling ROIC)? ROE cross-check — if ROE >> ROIC, leverage is masking weak economics.
 
 DIMENSION 4 — GROWTH QUALITY
-MOST IMPORTANT dimension. A consistent 15% grower for 5 years >> a 30% one-year spike followed by decline. Assess: revenue CAGR over full period, NI CAGR vs revenue CAGR (margin expansion?), year-to-year consistency (low variance = high quality), trajectory (accelerating or decelerating), any down years (big penalty). Is this growth organic or acquisition-driven?
+MOST IMPORTANT dimension. Reference the TREND SIGNALS block — pay close attention to operating leverage signal, down years, and growth trajectory (accelerating vs decelerating).
+A consistent 15% grower for 5 years >> a 30% one-year spike. Assess: revenue CAGR over full period, NI CAGR vs revenue CAGR (margin expansion = operating leverage present), year-to-year consistency (σ of growth rates — low SD = high quality), any down years (each down year is a -10pt penalty). Is growth organic or acquisition-driven?
 
 DIMENSION 5 — BALANCE SHEET
-Assess: net cash vs. net debt position, ND/EBITDA, interest coverage, financial flexibility to invest counter-cyclically or buy back shares. Is leverage increasing or decreasing?
+Assess: net cash vs. net debt position, ND/EBITDA, interest coverage, financial flexibility to invest counter-cyclically. Is leverage increasing or decreasing?
 
 DIMENSION 6 — PHOENICIAN FIT
-Holistic assessment: Given everything above plus your research, how well does this fit Phoenician Capital's mandate? Consider founder/owner alignment, moat durability, scalability, whether it's genuinely under-followed, valuation attractiveness given quality and growth, and how it compares to the existing portfolio.
+Holistic assessment: founder/owner alignment, moat durability, scalability, whether it's genuinely under-followed, valuation attractiveness given quality and growth, how it compares to existing portfolio holdings.
 
 RISK ASSESSMENT
-Separately assess investment risks. Consider: leverage risk, earnings quality risk, geographic/jurisdiction risk (EM vs. developed), customer concentration, management quality signals, competitive threats from your research, valuation risk (priced for perfection?), accounting quality. Assign a risk score where 0 = minimal risk and 100 = very high risk. Most quality businesses score 5–30.
+Assess investment risks specifically from your research: leverage, earnings quality, geographic risk, customer concentration, competitive threats, management quality signals, valuation risk. Score 0 = minimal, 100 = very high risk. Most quality businesses score 5–35.
 
-OVERALL FIT SCORE
-Give ONE overall score 0–100 representing your holistic conviction that this company belongs in Phoenician Capital's universe for further research. This is your final judgment integrating all dimensions. Be decisive — do not hedge by scoring everything 50–60.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DCF VALUATION — CHOOSE YOUR ASSUMPTIONS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+The DCF INPUTS block in the financial history above gives you the raw materials. Now choose assumptions that reflect the *specific business* you have researched — not a formula.
+
+Stage 1 growth (5yr): Base it on your research + historical EBIT CAGR. Justify every point above or below the historical rate.
+  - Capital-light SaaS with NRR >110% and accelerating growth: 18–25%
+  - Stable compounder with consistent 12% growth: 10–14%
+  - Decelerating or cyclical business: 2–6%
+  - Declining business: negative
+
+Terminal growth (perpetual): 2–3.5% for durable businesses; 1.5% for average; 1% for uncertain.
+
+WACC: Start from the base WACC shown in DCF INPUTS (Tier-1 = 9%, Tier-2 = 11%).
+  Adjust +1–3% for: customer concentration, leverage risk, management quality concerns, early-stage with unproven model
+  Adjust −0.5–1% for: net cash balance sheet, recurring revenue, monopoly-like position
+
+Your reasoning MUST reference specific findings from your research — not generic statements.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+DEVIL'S ADVOCATE — BEAR CASE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Before giving your final score, you MUST write the bear case. This is not optional.
+
+State 2–3 specific reasons why this investment could fail or disappoint:
+1. The strongest competitive threat you found in your research
+2. The most concerning financial trend in the data (from TREND SIGNALS or raw numbers)
+3. Whether the current valuation leaves a margin of safety — or whether the stock is priced for perfection
+
+Only after writing this bear case should you assign the overall_fit_score. If the bear case is mild and the bull case is overwhelming, score high. If the bear case is severe, score low regardless of the positives.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SCORE REVIEW — SELF-CRITIQUE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Before outputting JSON, review your scores:
+- Am I being too generous? A score of 60 means "median S&P 500 company" — would I actually add this to a concentrated 15-position fund?
+- Is my overall_fit_score consistent with my dimension scores? A 70 overall requires most dimensions to be 65+. A 75 overall requires most dimensions to be 70+.
+- Does this business compound intrinsic value at 15%+ per year? If not, the score belongs below 60.
+- Did my bear case research reveal anything that should push a score down? Apply it.
+
+Adjust any score that doesn't survive this test, then output the final JSON.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+VERDICT ASSIGNMENT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Assign analyst_verdict using these strict thresholds:
+- RESEARCH NOW: overall_fit_score ≥ 72 AND risk_score ≤ 45
+- WATCH:        overall_fit_score 55–71, OR (overall_fit_score ≥ 72 AND risk_score 46–65)
+- PASS:         overall_fit_score < 55 OR risk_score > 65
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 OUTPUT — RETURN ONLY THIS JSON
@@ -71,37 +139,48 @@ OUTPUT — RETURN ONLY THIS JSON
 {
   "business_quality": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences with specific numbers and your research findings on moat>"
+    "evidence": "<2-3 sentences: moat from research, gross margin trend from TREND SIGNALS, pricing power evidence>"
   },
   "unit_economics": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences citing FCF/NI ratio, FCF yield, capex intensity>"
+    "evidence": "<2-3 sentences: FCF/NI ratio, FCF yield, capex intensity, asset-light vs capital-hungry>"
   },
   "capital_returns": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences on ROIC level, trend, and spread over cost of capital>"
+    "evidence": "<2-3 sentences: ROIC level, trend, spread over cost of capital>"
   },
   "growth_quality": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences on revenue CAGR, NI CAGR, consistency, and trajectory>"
+    "evidence": "<2-3 sentences: revenue CAGR, operating leverage signal, consistency (σ), down years, trajectory>"
   },
   "balance_sheet": {
     "score": <0-100>,
-    "evidence": "<1-2 sentences on net debt, leverage, and financial flexibility>"
+    "evidence": "<1-2 sentences: net debt, leverage trend, financial flexibility>"
   },
   "phoenician_fit": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences on mandate alignment, portfolio comparison, moat from research>"
+    "evidence": "<2-3 sentences: mandate alignment, portfolio comparison, moat durability from research>"
   },
   "risk_score": <0-100>,
-  "risk_evidence": "<2-3 sentences on the key risks — be specific, cite actual metrics and research findings>",
+  "risk_evidence": "<2-3 sentences: key risks from research — specific, cite actual metrics and findings>",
+  "bear_case": [
+    "<Specific bear case point 1 — competitive threat from research with company names/data>",
+    "<Specific bear case point 2 — most concerning financial trend with numbers from TREND SIGNALS>",
+    "<Specific bear case point 3 — valuation risk or margin of safety assessment>"
+  ],
+  "dcf_assumptions": {
+    "stage1_growth_pct": <number, e.g. 16>,
+    "stage2_terminal_pct": <number, e.g. 3.0>,
+    "wacc_pct": <number, e.g. 9.5>,
+    "reasoning": "<2-3 sentences justifying each assumption with specific research findings — not generic>"
+  },
   "overall_fit_score": <0-100>,
   "investment_thesis": "<One sentence: bull case + key risk with specific numbers>",
   "diligence_questions": [
-    "<Specific question 1 a real analyst must answer before conviction>",
+    "<Specific question 1 a real analyst must answer before conviction — reference a specific uncertainty from research>",
     "<Specific question 2>",
     "<Specific question 3>"
   ],
   "analyst_verdict": "<RESEARCH NOW | WATCH | PASS>",
-  "analyst_note": "<One specific data-grounded sentence: the single most important thing about this company>"
+  "analyst_note": "<One specific data-grounded sentence: the single most important thing — positive or negative — about this company>"
 }
