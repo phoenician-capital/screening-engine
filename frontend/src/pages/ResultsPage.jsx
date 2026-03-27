@@ -342,9 +342,9 @@ function DetailDrawer({ row, onClose, onFeedback }) {
         )}
 
         {tab === 'scoring' && (
-          <div className="animate-fade-in">
+          <div className="animate-fade-in space-y-6">
             {row.dimensions?.length > 0 ? (
-              <>
+              <div>
                 <div className="section-label mb-4">AI Analyst Dimensions</div>
                 {row.dimensions.map(d => (
                   <ScoreBar
@@ -354,9 +354,32 @@ function DetailDrawer({ row, onClose, onFeedback }) {
                     evidence={d.evidence}
                   />
                 ))}
-              </>
+              </div>
             ) : (
               <p className="text-sm text-stone-400">No scoring detail available.</p>
+            )}
+
+            {row.dcf_result && (
+              <div>
+                <div className="section-label mb-2">DCF Valuation</div>
+                <div className="p-3 bg-blue-50 border border-blue-100 rounded-xs">
+                  <p className="text-xs text-blue-800 leading-relaxed font-mono">{row.dcf_result}</p>
+                </div>
+              </div>
+            )}
+
+            {row.bear_case?.length > 0 && (
+              <div>
+                <div className="section-label mb-2">Bear Case</div>
+                <div className="space-y-2">
+                  {row.bear_case.map((b, i) => (
+                    <div key={i} className="flex gap-2 p-3 bg-red-50 border border-red-100 rounded-xs">
+                      <span className="text-red-400 font-bold text-xs flex-shrink-0 mt-0.5">↓</span>
+                      <p className="text-xs text-stone-700 leading-relaxed">{b}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
           </div>
         )}

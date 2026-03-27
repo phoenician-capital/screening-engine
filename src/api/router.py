@@ -120,8 +120,27 @@ async def get_recommendations(limit: int = Query(500, le=1000)):
                             "name":     c["name"],
                             "label":    c["name"].replace("_", " ").title(),
                             "score":    raw,
-                            "evidence": ev[:280],
+                            "evidence": ev,  # full evidence — no truncation
                         })
+
+                # Bear case + DCF from analyst_thesis evidence
+                bear_case, dcf_result = [], ""
+                if thesis_entry:
+                    ev = thesis_entry.get("evidence", "")
+                    if "BEAR CASE:" in ev:
+                        bear_raw = ev.split("BEAR CASE:")[1]
+                        if "DCF:" in bear_raw:
+                            bear_raw = bear_raw.split("DCF:")[0]
+                        elif "DILIGENCE:" in bear_raw:
+                            bear_raw = bear_raw.split("DILIGENCE:")[0]
+                        bear_case = [b.strip() for b in bear_raw.split("|") if b.strip()]
+                    if "DCF:" in ev:
+                        dcf_raw = ev.split("DCF:")[1]
+                        if "DCF reasoning:" in dcf_raw:
+                            dcf_raw = dcf_raw.split("DCF reasoning:")[0]
+                        elif "DILIGENCE:" in dcf_raw:
+                            dcf_raw = dcf_raw.split("DILIGENCE:")[0]
+                        dcf_result = dcf_raw.strip().split("|")[0].strip()
 
                 rows.append({
                     "id":           str(r.id),
@@ -155,6 +174,8 @@ async def get_recommendations(limit: int = Query(500, le=1000)):
                     "diligence":         diligence,
                     "verdict":           verdict,
                     "dimensions":        dimensions,
+                    "bear_case":         bear_case,
+                    "dcf_result":        dcf_result,
                     "portfolio_comparison": r.portfolio_comparison,
                 })
             return rows

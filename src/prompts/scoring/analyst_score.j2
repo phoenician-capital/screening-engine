@@ -54,29 +54,36 @@ Goal: How does the stock trade vs sector peers? Any insider activity? What is ma
 DIMENSION SCORING
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Score each dimension 0–100. Reference your research AND the TREND SIGNALS block specifically.
+Score each dimension 0–100. Every evidence field MUST include specific numbers — percentages, multiples, dollar figures. No vague statements like "strong margins" — write "gross margin 73% (up from 68% 3 years ago, +500bps trend)".
 
 DIMENSION 1 — BUSINESS QUALITY
-Assess: competitive moat from your research, gross margin level and multi-year trend (pay close attention to TREND SIGNALS — expanding or contracting?), operating leverage, pricing power evidence. What makes this business defensible or not? A business with contracting gross margins despite revenue growth has no pricing power — score harshly.
+Assess: competitive moat from your research, gross margin level and multi-year trend (pay close attention to TREND SIGNALS — expanding or contracting?), operating leverage, pricing power evidence.
+REQUIRED IN EVIDENCE: gross margin % + trend direction + bps change, moat type, 1–2 specific competitors.
 
 DIMENSION 2 — UNIT ECONOMICS
-Assess: FCF/Net Income ratio (is NI real cash?), FCF yield, capex intensity, whether FCF is growing faster than revenue, working capital dynamics. Is this asset-light or capital-hungry?
+Assess: FCF/Net Income ratio (is NI real cash?), FCF yield, capex intensity, whether FCF is growing faster than revenue.
+REQUIRED IN EVIDENCE: FCF yield %, FCF/NI ratio %, capex as % of revenue if relevant.
 
 DIMENSION 3 — CAPITAL RETURNS
-Assess: ROIC level and multi-year trend. Is the company earning above its cost of capital? Is the moat widening (rising ROIC) or eroding (falling ROIC)? ROE cross-check — if ROE >> ROIC, leverage is masking weak economics.
+Assess: ROIC level and multi-year trend. Is the company earning above its cost of capital? Is the moat widening or eroding?
+REQUIRED IN EVIDENCE: ROIC % (current), ROIC trend direction, spread over WACC in percentage points.
 
 DIMENSION 4 — GROWTH QUALITY
-MOST IMPORTANT dimension. Reference the TREND SIGNALS block — pay close attention to operating leverage signal, down years, and growth trajectory (accelerating vs decelerating).
-A consistent 15% grower for 5 years >> a 30% one-year spike. Assess: revenue CAGR over full period, NI CAGR vs revenue CAGR (margin expansion = operating leverage present), year-to-year consistency (σ of growth rates — low SD = high quality), any down years (each down year is a -10pt penalty). Is growth organic or acquisition-driven?
+MOST IMPORTANT dimension. Reference the TREND SIGNALS block — pay close attention to operating leverage signal, down years, and growth trajectory.
+REQUIRED IN EVIDENCE: revenue CAGR %, NI CAGR %, growth σ, number of down years, trajectory label (accelerating/decelerating/stable).
 
 DIMENSION 5 — BALANCE SHEET
-Assess: net cash vs. net debt position, ND/EBITDA, interest coverage, financial flexibility to invest counter-cyclically. Is leverage increasing or decreasing?
+Assess: net cash vs. net debt, ND/EBITDA, interest coverage, financial flexibility.
+REQUIRED IN EVIDENCE: ND/EBITDA multiple, net cash or net debt $ amount, leverage trend.
 
 DIMENSION 6 — PHOENICIAN FIT
-Holistic assessment: founder/owner alignment, moat durability, scalability, whether it's genuinely under-followed, valuation attractiveness given quality and growth, how it compares to existing portfolio holdings.
+Holistic assessment: founder/owner alignment, moat durability, scalability, valuation attractiveness.
+REQUIRED IN EVIDENCE: EV/EBIT or P/FCF multiple vs sector median, founder ownership % if known, verdict on mandate fit.
 
 RISK ASSESSMENT
-Assess investment risks specifically from your research: leverage, earnings quality, geographic risk, customer concentration, competitive threats, management quality signals, valuation risk. Score 0 = minimal, 100 = very high risk. Most quality businesses score 5–35.
+Assess investment risks specifically from your research.
+REQUIRED IN EVIDENCE: 2–3 specific risks each with a number (e.g. "top customer = 38% of revenue", "ND/EBITDA 3.8x", "stock down 40% from peak, P/S still 8x").
+Score 0 = minimal, 100 = very high risk. Most quality businesses score 5–35.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 DCF VALUATION — CHOOSE YOUR ASSUMPTIONS
@@ -139,30 +146,30 @@ OUTPUT — RETURN ONLY THIS JSON
 {
   "business_quality": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences: moat from research, gross margin trend from TREND SIGNALS, pricing power evidence>"
+    "evidence": "<2-3 sentences — MUST include: gross margin % + trend (e.g. '73% GM, up +500bps over 3yr'), moat type, key competitor>"
   },
   "unit_economics": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences: FCF/NI ratio, FCF yield, capex intensity, asset-light vs capital-hungry>"
+    "evidence": "<2-3 sentences — MUST include: FCF yield %, FCF/NI conversion %, capex intensity %>"
   },
   "capital_returns": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences: ROIC level, trend, spread over cost of capital>"
+    "evidence": "<2-3 sentences — MUST include: ROIC % current, ROIC trend, spread vs WACC in pp>"
   },
   "growth_quality": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences: revenue CAGR, operating leverage signal, consistency (σ), down years, trajectory>"
+    "evidence": "<2-3 sentences — MUST include: revenue CAGR %, NI CAGR %, growth σ, down years count, trajectory>"
   },
   "balance_sheet": {
     "score": <0-100>,
-    "evidence": "<1-2 sentences: net debt, leverage trend, financial flexibility>"
+    "evidence": "<1-2 sentences — MUST include: ND/EBITDA multiple or net cash $, leverage trend>"
   },
   "phoenician_fit": {
     "score": <0-100>,
-    "evidence": "<2-3 sentences: mandate alignment, portfolio comparison, moat durability from research>"
+    "evidence": "<2-3 sentences — MUST include: EV/EBIT or P/FCF multiple vs sector median, founder ownership % if known>"
   },
   "risk_score": <0-100>,
-  "risk_evidence": "<2-3 sentences: key risks from research — specific, cite actual metrics and findings>",
+  "risk_evidence": "<2-3 sentences — MUST include specific numbers: customer concentration %, leverage ratio, valuation multiple, or other quantified risk>",
   "bear_case": [
     "<Specific bear case point 1 — competitive threat from research with company names/data>",
     "<Specific bear case point 2 — most concerning financial trend with numbers from TREND SIGNALS>",
@@ -175,12 +182,12 @@ OUTPUT — RETURN ONLY THIS JSON
     "reasoning": "<2-3 sentences justifying each assumption with specific research findings — not generic>"
   },
   "overall_fit_score": <0-100>,
-  "investment_thesis": "<One sentence: bull case + key risk with specific numbers>",
+  "investment_thesis": "<One sentence: bull case with specific metrics (e.g. '73% GM, 22% ROIC, 18% CAGR') + key risk with number>",
   "diligence_questions": [
-    "<Specific question 1 a real analyst must answer before conviction — reference a specific uncertainty from research>",
+    "<Specific question 1 — reference a number or metric that needs validation (e.g. 'What explains the FCF/NI gap of only 62%...')>",
     "<Specific question 2>",
     "<Specific question 3>"
   ],
   "analyst_verdict": "<RESEARCH NOW | WATCH | PASS>",
-  "analyst_note": "<One specific data-grounded sentence: the single most important thing — positive or negative — about this company>"
+  "analyst_note": "<One sentence — MUST cite a specific number: the single most important data point — e.g. 'ROIC has expanded from 9% to 22% over 4 years while revenue grew at 19% CAGR, suggesting a genuine compounding engine'>"
 }
