@@ -513,16 +513,22 @@ async def get_ticker_signals(ticker: str, news_limit: int = Query(5, le=20)):
                 for d in ir_docs
             ]
 
-            # Live news via Perplexity
+            # Live news via Perplexity (sonar = fast, sonar-deep-research = thorough)
             news = []
             try:
-                client = NewsClient()
-                articles = await client.search(
+                from src.shared.llm.client_factory import complete
+                from src.prompts import load_prompt
+                prompt = load_prompt(
+                    "ingestion/news_search.j2",
                     query=f"{ticker} investor news earnings",
                     tickers=[ticker],
+                    date_from=None,
                     limit=news_limit,
                 )
-                news = articles
+                system = load_prompt("ingestion/news_search_system.j2")
+                raw = await complete(prompt, model="sonar", system=system, max_tokens=2000, temperature=0.1)
+                client = NewsClient()
+                news = client._parse_articles(raw)[:news_limit]
             except Exception as e:
                 logger.warning("News fetch failed for %s: %s", ticker, e)
 
