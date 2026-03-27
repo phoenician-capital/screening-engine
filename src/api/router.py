@@ -410,28 +410,63 @@ async def get_portfolio():
     try:
         async with factory() as session:
             from src.db.repositories.portfolio_repo import PortfolioRepository
-            repo = PortfolioRepository(session)
+            from src.db.repositories import MetricRepository, RecommendationRepository
+            repo     = PortfolioRepository(session)
+            m_repo   = MetricRepository(session)
+            rec_repo = RecommendationRepository(session)
+
             holdings = await repo.get_active()
             avg      = await repo.get_avg_metrics()
-            return {
-                "holdings": [
-                    {
-                        "ticker":          h.ticker,
-                        "name":            h.name,
-                        "sector":          h.sector,
-                        "entry_price":     _f(h.entry_price),
-                        "position_size":   _f(h.position_size_usd),
-                        "date_added":      h.date_added.isoformat() if h.date_added else None,
-                        "notes":           h.notes,
-                        "entry_gross_margin":   _pct(h.entry_gross_margin) if hasattr(h, "entry_gross_margin") else None,
-                        "entry_roic":           _pct(h.entry_roic) if hasattr(h, "entry_roic") else None,
-                        "entry_ev_ebit":         _f(h.entry_ev_ebit) if hasattr(h, "entry_ev_ebit") else None,
-                        "entry_revenue_growth":  _pct(h.entry_revenue_growth) if hasattr(h, "entry_revenue_growth") else None,
-                    }
-                    for h in holdings
-                ],
-                "summary": avg,
-            }
+
+            rows = []
+            for h in holdings:
+                metrics = await m_repo.get_latest(h.ticker)
+                rec     = await rec_repo.get_latest_for_ticker(h.ticker)
+
+                # Parse thesis / verdict / diligence from analyst_thesis criterion
+                thesis = verdict = None
+                diligence = []
+                if rec and rec.scoring_detail:
+                    criteria = rec.scoring_detail.get("criteria", [])
+                    for c in criteria:
+                        if c.get("name") == "analyst_thesis":
+                            ev = c.get("evidence", "")
+                            if "THESIS:" in ev:
+                                parts = ev.split("|")
+                                for p in parts:
+                                    p = p.strip()
+                                    if p.startswith("THESIS:"):
+                                        thesis = p[7:].strip()
+                                    elif p.startswith("DILIGENCE:"):
+                                        diligence = [q.strip() for q in p[10:].split("|") if q.strip()]
+                                    elif p.startswith("VERDICT:"):
+                                        verdict = p[8:].strip()
+                            break
+
+                rows.append({
+                    "ticker":        h.ticker,
+                    "name":          h.name,
+                    "sector":        h.sector or (metrics and getattr(metrics, "gics_sector", None)),
+                    "date_added":    h.date_added.isoformat() if h.date_added else None,
+                    # Scored signals
+                    "fit_score":     _f(rec.fit_score)   if rec else None,
+                    "risk_score":    _f(rec.risk_score)  if rec else None,
+                    "rank_score":    _f(rec.rank_score)  if rec else None,
+                    "rank":          rec.rank             if rec else None,
+                    "verdict":       verdict,
+                    "thesis":        thesis,
+                    "diligence":     diligence,
+                    # Live metrics
+                    "gross_margin":      _pct(metrics.gross_margin)         if metrics and metrics.gross_margin      else None,
+                    "roic":              _pct(metrics.roic)                  if metrics and metrics.roic              else None,
+                    "revenue_growth":    _pct(metrics.revenue_growth_yoy)   if metrics and metrics.revenue_growth_yoy else None,
+                    "fcf_yield":         _pct(metrics.fcf_yield)             if metrics and metrics.fcf_yield          else None,
+                    "net_debt_ebitda":   _f(metrics.net_debt_ebitda)         if metrics and metrics.net_debt_ebitda   else None,
+                    "market_cap":        _f(metrics.market_cap_usd)          if metrics and metrics.market_cap_usd    else None,
+                    "ev_ebit":           _f(metrics.ev_ebit)                  if metrics and metrics.ev_ebit           else None,
+                })
+
+            return {"holdings": rows, "summary": avg}
     finally:
         await engine.dispose()
 
