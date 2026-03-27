@@ -979,7 +979,7 @@ async def _get_intl_candidates(client: httpx.AsyncClient,
                 model=_settings.llm.primary_model,
                 max_tokens=4000,
                 temperature=0.0,
-                max_searches=0,
+                max_searches=1,
             )
             clean = clean.strip()
             start = clean.find("[")
