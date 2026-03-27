@@ -774,12 +774,87 @@ def _compute_metrics(ticker: str, market_cap: float | None,
 
 # ── US universe via NASDAQ Trader API ────────────────────────────────────────
 
+async def _fmp_quality_prefilter(client: httpx.AsyncClient) -> list[dict]:
+    """Pre-filter US candidates using FMP's stock screener for quality metrics.
+
+    Calls the FMP company-screener endpoint with market cap, revenue, gross
+    margin, and revenue growth filters.  Returns a list of dicts with keys:
+    ticker, name, market_cap, gross_margin_pct, revenue_growth.
+
+    Returns an empty list on any error so the caller can fall back gracefully.
+    """
+    key = settings.ingestion.fmp_api_key
+    if not key:
+        logger.warning("FMP API key not configured — skipping quality prefilter")
+        return []
+
+    try:
+        data = await _get(
+            client,
+            "https://financialmodelingprep.com/stable/company-screener",
+            params={
+                "marketCapMoreThan":        250_000_000,
+                "marketCapLessThan":        5_000_000_000,
+                "revenueMoreThan":          50_000_000,
+                "grossProfitMarginMoreThan": 0.40,
+                "revenueGrowthMoreThan":    0.08,
+                "exchange":                 "NASDAQ,NYSE,AMEX",
+                "country":                  "US",
+                "limit":                    1000,
+                "apikey":                   key,
+            },
+        )
+        if not data or not isinstance(data, list):
+            logger.warning("FMP quality prefilter returned no usable data")
+            return []
+
+        results: list[dict] = []
+        for item in data:
+            ticker = str(item.get("symbol") or item.get("ticker") or "").upper()
+            if not ticker:
+                continue
+            results.append({
+                "ticker":          ticker,
+                "name":            item.get("companyName") or item.get("name") or ticker,
+                "market_cap":      item.get("marketCap"),
+                "gross_margin_pct": item.get("grossProfitMargin"),  # decimal, e.g. 0.62
+                "revenue_growth":  item.get("revenueGrowth"),       # decimal, e.g. 0.15
+                "exchange":        (item.get("exchangeShortName") or item.get("exchange") or "").upper(),
+                "country":         "US",
+                "cik":             None,  # will be enriched later if needed
+            })
+
+        logger.info("FMP quality prefilter returned %d candidates", len(results))
+        return results
+
+    except Exception as exc:
+        logger.warning("FMP quality prefilter failed: %s", exc)
+        return []
+
+
 async def _get_us_candidates(client: httpx.AsyncClient,
                               min_cap: float, max_cap: float) -> list[dict]:
-    """Get US companies in market cap range from NASDAQ Trader API.
-    Returns [{"ticker", "name", "market_cap", "cik"}]
+    """Get US companies in market cap range.
+
+    First tries the FMP stock screener (quality-filtered).  Falls back to the
+    NASDAQ Trader / EDGAR path if FMP returns fewer than 50 results or errors.
+
+    Returns [{"ticker", "name", "market_cap", "cik", ...}]
     """
-    # EDGAR ticker-to-CIK map — cache for 24h
+    # ── 1. Try FMP quality prefilter ─────────────────────────────────────────
+    fmp_results = await _fmp_quality_prefilter(client)
+    if len(fmp_results) >= 50:
+        import random
+        random.shuffle(fmp_results)
+        logger.info("Using FMP prefiltered candidates: %d (shuffled)", len(fmp_results))
+        return fmp_results
+
+    logger.info(
+        "FMP prefilter returned %d results (<50) — falling back to EDGAR/NASDAQ path",
+        len(fmp_results),
+    )
+
+    # ── 2. Fall back: EDGAR ticker-to-CIK map — cache for 24h ────────────────
     edgar_data = _cache_get("edgar:company_tickers_exchange")
     if not edgar_data:
         edgar_data = await _get(
@@ -952,9 +1027,9 @@ async def _get_intl_candidates(client: httpx.AsyncClient,
         raw = await complete_with_search(
             prompt=prompt,
             model=_settings.llm.primary_model,
-            max_tokens=6000,
+            max_tokens=8000,
             temperature=0.1,
-            max_searches=4,   # enough to pull from index lists + cross-check
+            max_searches=25,
         )
         text  = raw.strip()
         items = None
