@@ -189,7 +189,7 @@ risk_criteria:
 hard_filters:
   # Market cap — raise floor to $250M for better liquidity
   min_market_cap_usd: 250000000          # $250M
-  max_market_cap_usd: 10000000000        # $10B
+  max_market_cap_usd: 5000000000         # $5B
 
   # Quality floors
   min_gross_margin: 0.15                 # 15% floor

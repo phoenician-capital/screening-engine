@@ -90,7 +90,7 @@ class ScoringSettings:
     weights_file: Path = _ROOT / "src" / "config" / "scoring_weights.yaml"
     # Single authoritative market cap range — used everywhere
     min_market_cap: float = float(os.getenv("MIN_MARKET_CAP", "100_000_000"))
-    max_market_cap: float = float(os.getenv("MAX_MARKET_CAP", "10_000_000_000"))
+    max_market_cap: float = float(os.getenv("MAX_MARKET_CAP", "5_000_000_000"))
     # Kept for backward compat — alias to min/max
     @property
     def hard_min_market_cap(self) -> float:
