@@ -1,4 +1,6 @@
+import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
+import { Loader, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react'
 import clsx from 'clsx'
 import { useApi } from '../hooks/useApi'
 import { api } from '../api'
@@ -44,8 +46,11 @@ function InsiderRow({ p }) {
 }
 
 export default function PortfolioPage() {
-  const { data: portfolio, loading: loadP } = useApi(api.portfolio)
+  const { data: portfolio, loading: loadP, reload: reloadPortfolio } = useApi(api.portfolio)
   const { data: insiders,  loading: loadI } = useApi(() => api.insiders(30))
+
+  const [scan, setScan]         = useState(null)   // job state
+  const [scanning, setScanning] = useState(false)
 
   const holdings = portfolio?.holdings ?? []
   const summary  = portfolio?.summary  ?? {}
@@ -54,12 +59,75 @@ export default function PortfolioPage() {
 
   const hasMetrics = summary.avg_gross_margin != null || summary.avg_roic != null
 
+  // Poll scan status while running
+  useEffect(() => {
+    if (!scan?.running) return
+    const id = setInterval(async () => {
+      try {
+        const s = await api.screeningStatus()
+        setScan(s)
+        if (s.done && !s.running) {
+          clearInterval(id)
+          reloadPortfolio()
+        }
+      } catch {}
+    }, 3000)
+    return () => clearInterval(id)
+  }, [scan?.running])
+
+  const startScan = async () => {
+    setScanning(true)
+    try {
+      const res = await api.scanPortfolio()
+      if (res.ok) setScan(await api.screeningStatus())
+      else alert(res.message)
+    } catch (e) {
+      alert(`Scan failed: ${e.message}`)
+    } finally {
+      setScanning(false)
+    }
+  }
+
   return (
     <div className="px-10 pt-10 pb-16">
       {/* Header */}
-      <div className="mb-8">
-        <div className="section-label mb-2">Portfolio</div>
-        <h2 className="font-display text-4xl font-light text-stone-800">Holdings</h2>
+      <div className="flex items-end justify-between mb-8">
+        <div>
+          <div className="section-label mb-2">Portfolio</div>
+          <h2 className="font-display text-4xl font-light text-stone-800">Holdings</h2>
+        </div>
+        <div className="flex items-center gap-3">
+          {scan?.running && (
+            <span className="text-xs font-mono text-gold-600 animate-pulse-soft">
+              {scan.elapsed ?? 0}s elapsed
+            </span>
+          )}
+          {scan?.done && !scan?.error && (
+            <span className="flex items-center gap-1.5 text-xs text-emerald-600 font-semibold">
+              <CheckCircle size={13} /> Scan complete · {scan.scored} scored
+            </span>
+          )}
+          {scan?.error && (
+            <span className="flex items-center gap-1.5 text-xs text-red-500">
+              <AlertCircle size={13} /> {scan.error}
+            </span>
+          )}
+          <button
+            onClick={startScan}
+            disabled={scan?.running || scanning}
+            className={clsx(
+              'flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-xs transition-all',
+              scan?.running || scanning
+                ? 'bg-stone-100 text-stone-400 cursor-not-allowed'
+                : 'bg-stone-900 text-white hover:bg-stone-800 shadow-luxury'
+            )}
+          >
+            {scan?.running
+              ? <><Loader size={13} className="animate-spin" /> Scanning…</>
+              : <><RefreshCw size={13} /> Scan Portfolio</>
+            }
+          </button>
+        </div>
       </div>
 
       {/* Summary — only show if we have metric data */}

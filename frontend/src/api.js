@@ -23,6 +23,7 @@ export const api = {
 
   startScreening: (max_companies = 20) =>
     post('/screening/run', { max_companies }),
+  scanPortfolio: () => post('/screening/run-portfolio', {}),
   screeningStatus: () => get('/screening/status'),
 
   portfolio: () => get('/portfolio'),

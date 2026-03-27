@@ -302,6 +302,71 @@ async def start_screening(body: RunScreeningBody):
     return {"ok": True, "message": "Screening started"}
 
 
+@router.post("/screening/run-portfolio")
+async def start_portfolio_scan():
+    """Score only the active portfolio holdings (skip universe discovery)."""
+    with _SCREENING_LOCK:
+        if _SCREENING_JOB.get("running"):
+            return {"ok": False, "message": "A run is already in progress"}
+        _SCREENING_JOB.clear()
+        _SCREENING_JOB.update({
+            "running": True, "done": False, "error": None,
+            "step": 2, "step_label": "Scoring portfolio with AI Analyst Agent",
+            "tickers_found": 0, "scored": 0, "top_n": [],
+            "d1": "Portfolio scan — skipping discovery", "d2": "", "d3": "", "d4": "",
+            "t0": time.time(), "elapsed": 0,
+        })
+
+    def _bg():
+        try:
+            t0 = _SCREENING_JOB["t0"]
+
+            async def _get_tickers():
+                eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
+                fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+                try:
+                    async with fac() as sess:
+                        from src.db.repositories.portfolio_repo import PortfolioRepository
+                        repo = PortfolioRepository(sess)
+                        holdings = await repo.get_active()
+                        return [h.ticker for h in holdings]
+                finally:
+                    await eng.dispose()
+
+            tickers = _run_sync(_get_tickers())
+            _SCREENING_JOB.update({
+                "tickers_found": len(tickers),
+                "d1": f"{len(tickers)} portfolio holdings · discovery skipped",
+                "step": 2, "step_label": "Scoring with AI Analyst Agent",
+            })
+
+            async def _score():
+                from src.orchestration.pipelines.scoring_pipeline import ScoringPipeline
+                eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
+                fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+                try:
+                    async with fac() as sess:
+                        pipe = ScoringPipeline(sess)
+                        return await pipe.run(tickers=tickers, run_type="portfolio_scan")
+                finally:
+                    await eng.dispose()
+
+            t2 = time.time()
+            scored = _run_sync(_score())
+            _SCREENING_JOB.update({
+                "scored": len(scored) if isinstance(scored, list) else 0,
+                "d2": f"{_SCREENING_JOB['scored']} holdings scored · {time.time()-t2:.1f}s",
+                "d3": "Rankings saved to database",
+                "step": 3, "done": True, "running": False,
+                "elapsed": round(time.time() - t0),
+            })
+        except Exception as e:
+            _SCREENING_JOB.update({"error": str(e), "done": True, "running": False})
+
+    threading.Thread(target=_bg, daemon=False, name="api_portfolio_scan_bg").start()
+    return {"ok": True, "message": "Portfolio scan started"}
+
+
 @router.get("/screening/status")
 async def screening_status():
     """Poll the current screening run status."""
