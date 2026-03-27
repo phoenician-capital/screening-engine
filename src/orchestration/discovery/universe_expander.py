@@ -229,15 +229,6 @@ class UniverseExpander:
             conn.autocommit = False
             cur = conn.cursor()
 
-            # Drop anything whose real market cap is outside the target range
-            results = [
-                r for r in results
-                if r.get("company", {}).get("market_cap_usd") is None
-                or min_cap <= float(r["company"]["market_cap_usd"]) <= max_cap
-            ]
-            logger.info("After market cap filter (%s–%s): %d companies",
-                        f"${min_cap/1e6:.0f}M", f"${max_cap/1e9:.1f}B", len(results))
-
             for r in results:
                 ticker = r.get("company", {}).get("ticker", "?")
                 try:

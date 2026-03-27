@@ -48,6 +48,46 @@ def _get_redis():
 
 _redis_client = None
 
+# ── FX rate cache — fetched once per run, reused for all market cap conversions ──
+_fx_rates: dict[str, float] = {}  # e.g. {"SEK": 0.1056, "EUR": 1.151}
+
+async def _ensure_fx_rates(client: httpx.AsyncClient) -> None:
+    """Fetch USD conversion rates for all non-USD currencies we trade. One call per currency,
+    results cached in _fx_rates for the lifetime of the process."""
+    global _fx_rates
+    key = settings.ingestion.fmp_api_key
+    if not key:
+        return
+    currencies = ["SEK", "NOK", "DKK", "EUR", "GBP", "CHF", "AUD", "CAD", "JPY", "SGD", "ILS", "PLN", "HKD", "NZD"]
+    missing = [c for c in currencies if c not in _fx_rates]
+    if not missing:
+        return
+    tasks = []
+    for ccy in missing:
+        tasks.append(client.get(
+            "https://financialmodelingprep.com/stable/quote",
+            params={"symbol": f"{ccy}USD", "apikey": key}, timeout=5))
+    responses = await asyncio.gather(*tasks, return_exceptions=True)
+    for ccy, resp in zip(missing, responses):
+        try:
+            if isinstance(resp, Exception):
+                continue
+            data = resp.json()
+            if data and isinstance(data, list) and data[0].get("price"):
+                _fx_rates[ccy] = float(data[0]["price"])
+        except Exception:
+            pass
+
+def _to_usd(amount: float, currency: str) -> float | None:
+    """Convert amount in local currency to USD. Returns None if rate unknown."""
+    currency = (currency or "USD").upper()
+    if currency == "USD":
+        return amount
+    rate = _fx_rates.get(currency)
+    if rate is None:
+        return None
+    return amount * rate
+
 def _redis():
     global _redis_client
     if _redis_client is None:
@@ -358,7 +398,13 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
     stock_repurchased = cf.get("commonStockRepurchased") or cf.get("netCommonStockIssuance")
     stock_based_comp  = cf.get("stockBasedCompensation")
     acquisitions_net  = cf.get("acquisitionsNet")
-    market_cap        = km.get("marketCap") or (pro.get("marketCap") if isinstance(pro, dict) else None)
+    market_cap_raw    = km.get("marketCap") or (pro.get("marketCap") if isinstance(pro, dict) else None)
+    # Convert local currency market cap to USD using pre-fetched FX rates
+    if market_cap_raw and isinstance(pro, dict):
+        currency = (pro.get("currency") or "USD").upper()
+        market_cap = _to_usd(market_cap_raw, currency)
+    else:
+        market_cap = market_cap_raw
 
     # Revenue growth
     rev_yoy = None
@@ -1125,6 +1171,9 @@ async def screen_universe_global(
 
     async with httpx.AsyncClient(timeout=20) as client:
 
+        # ── Fetch FX rates once upfront for all market cap conversions ────────
+        await _ensure_fx_rates(client)
+
         # ── Fast path: Claude pre-selected tickers ────────────────────────────
         if preselected_tickers:
             logger.info("Fast path: fetching financials for %d pre-selected tickers", len(preselected_tickers))
@@ -1169,7 +1218,9 @@ async def screen_universe_global(
                     if not fin or fin.get("excluded"):
                         return
 
-                    mc = fin.get("market_cap_fmp") or co.get("market_cap") or 500_000_000
+                    mc = fin.get("market_cap_fmp") or None
+                    if mc is None or mc < min_market_cap or mc > max_market_cap:
+                        return  # Real market cap unknown or out of range — skip
                     country = fin.get("country") or co.get("country","US") or "US"
 
                     # Skip debt instruments
@@ -1200,6 +1251,11 @@ async def screen_universe_global(
                         "market_tier":         co.get("market_tier", 1),
                     }
                     metrics = _compute_metrics(ticker, mc, fin.get("shares_outstanding"), fin)
+
+                    # Drop out-of-range market caps before counting toward max_companies
+                    if mc is not None and (mc < min_market_cap or mc > max_market_cap):
+                        logger.debug("Skip %s: market cap $%.0fM out of range", ticker, (mc or 0)/1e6)
+                        return
 
                     results.append({"company": company_info, "metrics": metrics})
                     n = len(results)
