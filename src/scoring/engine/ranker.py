@@ -46,7 +46,7 @@ class Ranker:
                 rejects * self.decay_per_reject * 100
             )
 
-        return base + adjustment
+        return max(0.0, base + adjustment)
 
     def rank(self, results: list[ScoringResult]) -> list[ScoringResult]:
         """Sort results by rank_score descending, assign rank positions."""

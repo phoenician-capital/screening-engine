@@ -5,7 +5,7 @@ import ResultsPage       from './pages/ResultsPage'
 import ScreeningPage     from './pages/ScreeningPage'
 import PortfolioPage     from './pages/PortfolioPage'
 import FiltersPage       from './pages/FiltersPage'
-import { useApi }        from './hooks/useApi'
+import { usePoll } from './hooks/useApi'
 import { api }           from './api'
 
 const NAV = [
@@ -16,7 +16,7 @@ const NAV = [
 ]
 
 function Sidebar() {
-  const { data: stats } = useApi(api.stats)
+  const { data: stats } = usePoll(api.stats, 60000)
   const loc = useLocation()
 
   return (

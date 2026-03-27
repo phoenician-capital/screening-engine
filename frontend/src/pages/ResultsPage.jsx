@@ -193,8 +193,9 @@ function TableRow({ row, rank, selected, onClick }) {
   return (
     <tr
       onClick={onClick}
+      title="Click to view memo & details"
       className={clsx(
-        'data-row group',
+        'data-row group cursor-pointer',
         selected && 'bg-gold-50/50 border-b-gold-200'
       )}
     >
@@ -220,7 +221,7 @@ function TableRow({ row, rank, selected, onClick }) {
       <td className="px-3 py-3 text-right font-mono text-sm text-stone-600">{fmtCap(row.market_cap)}</td>
       <td className="px-3 py-3 text-right"><ScorePill score={row.fit_score} /></td>
       <td className="px-3 py-3 text-right"><ScorePill score={row.risk_score} inverted /></td>
-      <td className="px-3 py-3 text-right"><ScorePill score={row.rank_score} /></td>
+      <td className="px-3 py-3 text-right"><ScorePill score={Math.max(0, row.rank_score)} /></td>
       <td className="px-3 py-3 text-right font-mono text-sm text-stone-600">{fmtPct(row.gross_margin)}</td>
       <td className="px-3 py-3 text-right font-mono text-sm text-stone-600">{fmtPct(row.roic)}</td>
       <td className="px-3 py-3 text-right font-mono text-sm text-stone-600">{fmtPct(row.fcf_yield)}</td>
@@ -288,7 +289,7 @@ function DetailDrawer({ row, onClose, onFeedback }) {
           {[
             { label: 'Fit Score',  value: row.fit_score,   pill: true },
             { label: 'Risk Score', value: row.risk_score,  pill: true, inv: true },
-            { label: 'Rank Score', value: row.rank_score?.toFixed(1) },
+            { label: 'Rank Score', value: Math.max(0, row.rank_score ?? 0).toFixed(1) },
             { label: 'Mkt Cap',    value: fmtCap(row.market_cap) },
           ].map(({ label, value, pill, inv }) => (
             <div key={label} className="bg-stone-50 rounded-xs p-3 border border-stone-100">
