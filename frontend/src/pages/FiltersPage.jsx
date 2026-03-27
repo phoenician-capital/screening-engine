@@ -1,9 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { CheckCircle, X, Plus, Shield, TrendingDown, Globe, Building2, Filter } from 'lucide-react'
+import { getData as getCountries } from 'country-list'
 import { useApi } from '../hooks/useApi'
 import { api } from '../api'
 import { Skeleton } from '../components/Skeleton'
+import { GICS_SECTORS, GICS_SUB_INDUSTRIES } from '../data/gics'
 
 /* ─── primitives ─────────────────────────────────────────────── */
 
@@ -65,29 +67,11 @@ function Toggle({ label, hint, checked, onChange }) {
 
 /* ─── chip list (sectors / countries / tickers) ──────────────── */
 
-const SECTOR_OPTIONS = [
-  'Energy', 'Utilities', 'Financials', 'Financial Services', 'Real Estate',
-  'Materials', 'Industrials', 'Consumer Defensive', 'Consumer Cyclical',
-  'Consumer Discretionary', 'Healthcare', 'Health Care', 'Technology',
-  'Information Technology', 'Communication Services',
-]
+// Built from gics.js — all 11 sector names
+const SECTOR_OPTIONS = GICS_SECTORS.map(s => s.name)
 
-const COUNTRY_OPTIONS = [
-  { code: 'CN', label: 'China' },
-  { code: 'RU', label: 'Russia' },
-  { code: 'IR', label: 'Iran' },
-  { code: 'KP', label: 'North Korea' },
-  { code: 'SY', label: 'Syria' },
-  { code: 'BY', label: 'Belarus' },
-  { code: 'TR', label: 'Turkey' },
-  { code: 'IN', label: 'India' },
-  { code: 'BR', label: 'Brazil' },
-  { code: 'MX', label: 'Mexico' },
-  { code: 'ID', label: 'Indonesia' },
-  { code: 'AR', label: 'Argentina' },
-  { code: 'NG', label: 'Nigeria' },
-  { code: 'PK', label: 'Pakistan' },
-]
+// All ISO 3166-1 countries from country-list, shaped as { code, label }
+const ALL_COUNTRIES = getCountries().map(c => ({ code: c.code, label: c.name }))
 
 function ChipList({ items, onRemove, color = 'stone' }) {
   const colors = {
@@ -115,17 +99,27 @@ function ChipList({ items, onRemove, color = 'stone' }) {
   )
 }
 
-function AddFromDropdown({ label, options, existing, onAdd, placeholder }) {
-  const [open, setOpen] = useState(false)
-  const available = options.filter(o => {
-    const val = typeof o === 'object' ? o.code : o
-    return !existing.includes(val)
-  })
+function AddFromDropdown({ label, options, existing, onAdd, searchable = false }) {
+  const [open, setOpen]     = useState(false)
+  const [query, setQuery]   = useState('')
+
+  const available = useMemo(() => {
+    const base = options.filter(o => {
+      const val = typeof o === 'object' ? o.code : o
+      return !existing.includes(val)
+    })
+    if (!searchable || !query.trim()) return base
+    const q = query.toLowerCase()
+    return base.filter(o => {
+      const text = typeof o === 'object' ? `${o.label} ${o.code}` : o
+      return text.toLowerCase().includes(q)
+    })
+  }, [options, existing, query, searchable])
 
   return (
     <div className="relative">
       <button
-        onClick={() => setOpen(v => !v)}
+        onClick={() => { setOpen(v => !v); setQuery('') }}
         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-medium
                    border border-dashed border-stone-300 rounded text-stone-500
                    hover:border-stone-400 hover:text-stone-700 transition-colors"
@@ -133,27 +127,44 @@ function AddFromDropdown({ label, options, existing, onAdd, placeholder }) {
         <Plus size={10} strokeWidth={2.5} /> {label}
       </button>
       <AnimatePresence>
-        {open && available.length > 0 && (
+        {open && (
           <motion.div
             initial={{ opacity: 0, y: -4 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -4 }}
             transition={{ duration: 0.12 }}
-            className="absolute z-20 mt-1 w-56 bg-white border border-stone-200 rounded-sm shadow-xl overflow-y-auto max-h-52"
+            className="absolute z-20 mt-1 w-64 bg-white border border-stone-200 rounded-sm shadow-xl flex flex-col"
           >
-            {available.map(o => {
-              const val   = typeof o === 'object' ? o.code : o
-              const label = typeof o === 'object' ? `${o.label} (${o.code})` : o
-              return (
-                <button
-                  key={val}
-                  onClick={() => { onAdd(val); setOpen(false) }}
-                  className="w-full text-left px-3 py-2 text-xs text-stone-700 hover:bg-stone-50 transition-colors"
-                >
-                  {label}
-                </button>
-              )
-            })}
+            {searchable && (
+              <div className="p-2 border-b border-stone-100">
+                <input
+                  autoFocus
+                  value={query}
+                  onChange={e => setQuery(e.target.value)}
+                  placeholder="Search…"
+                  className="w-full px-2 py-1.5 text-xs bg-stone-50 border border-stone-200 rounded
+                             focus:outline-none focus:border-gold-400"
+                />
+              </div>
+            )}
+            <div className="overflow-y-auto max-h-52">
+              {available.length === 0
+                ? <div className="px-3 py-3 text-xs text-stone-400">No matches</div>
+                : available.map(o => {
+                    const val  = typeof o === 'object' ? o.code : o
+                    const text = typeof o === 'object' ? `${o.label} (${o.code})` : o
+                    return (
+                      <button
+                        key={val}
+                        onClick={() => { onAdd(val); setOpen(false); setQuery('') }}
+                        className="w-full text-left px-3 py-2 text-xs text-stone-700 hover:bg-stone-50 transition-colors"
+                      >
+                        {text}
+                      </button>
+                    )
+                  })
+              }
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -208,8 +219,11 @@ function RuleCard({ rule, onRemove }) {
 
 /* ─── main page ──────────────────────────────────────────────── */
 
-const DEFAULT_EXCLUDED_SECTORS  = ['Energy', 'Utilities', 'Financials', 'Financial Services', 'Real Estate']
-const DEFAULT_EXCLUDED_COUNTRIES = ['CN', 'RU', 'IR', 'KP', 'SY', 'BY']
+const DEFAULT_EXCLUDED_SECTORS     = ['Energy', 'Utilities', 'Financials', 'Financial Services', 'Real Estate']
+const DEFAULT_EXCLUDED_COUNTRIES   = ['CN', 'RU', 'IR', 'KP', 'SY', 'BY']
+
+// Sub-industry options for the dropdown — name only (used as key)
+const SUB_INDUSTRY_OPTIONS = GICS_SUB_INDUSTRIES.map(s => s.name).sort()
 
 export default function FiltersPage() {
   const { data: cfg, loading } = useApi(api.settings)
@@ -217,9 +231,10 @@ export default function FiltersPage() {
   const [local, setLocal]      = useState(null)
 
   // Editable exclusion lists — stored locally, saved to hard_filters
-  const [exSectors,   setExSectors]   = useState(DEFAULT_EXCLUDED_SECTORS)
-  const [exCountries, setExCountries] = useState(DEFAULT_EXCLUDED_COUNTRIES)
-  const [exTickers,   setExTickers]   = useState([])
+  const [exSectors,      setExSectors]      = useState(DEFAULT_EXCLUDED_SECTORS)
+  const [exSubIndustries,setExSubIndustries] = useState([])
+  const [exCountries,    setExCountries]    = useState(DEFAULT_EXCLUDED_COUNTRIES)
+  const [exTickers,      setExTickers]      = useState([])
 
   useEffect(() => {
     if (cfg) {
@@ -229,6 +244,8 @@ export default function FiltersPage() {
       const hf = copy.hard_filters ?? {}
       if (Array.isArray(hf.excluded_gics_sectors))
         setExSectors(hf.excluded_gics_sectors.filter(s => isNaN(+s)))
+      if (Array.isArray(hf.excluded_gics_sub_industries))
+        setExSubIndustries(hf.excluded_gics_sub_industries)
       if (Array.isArray(hf.excluded_countries))
         setExCountries(hf.excluded_countries.map(c => c.toUpperCase()))
       if (Array.isArray(hf.excluded_tickers))
@@ -249,9 +266,10 @@ export default function FiltersPage() {
       ...local,
       hard_filters: {
         ...local.hard_filters,
-        excluded_gics_sectors: exSectors,
-        excluded_countries:    exCountries,
-        excluded_tickers:      exTickers,
+        excluded_gics_sectors:          exSectors,
+        excluded_gics_sub_industries:   exSubIndustries,
+        excluded_countries:             exCountries,
+        excluded_tickers:               exTickers,
       },
     }
     try {
@@ -305,10 +323,33 @@ export default function FiltersPage() {
             existing={exSectors}
             onAdd={s => setExSectors(v => [...v, s])}
           />
+          <div className="text-[10px] text-stone-400 mt-1">
+            {GICS_SECTORS.length} GICS sectors — use sub-industry exclusions below for finer control
+          </div>
         </div>
       </Section>
 
-      {/* ── 2. Country Exclusions ── */}
+      {/* ── 2. Sub-Industry Exclusions ── */}
+      <Section icon={Building2} title="Sub-Industry Exclusions" sub="Granular GICS sub-industry exclusions within allowed sectors.">
+        <div className="bg-white border border-stone-150 rounded-sm shadow-luxury p-5 space-y-4">
+          {exSubIndustries.length > 0
+            ? <ChipList items={exSubIndustries} onRemove={s => setExSubIndustries(v => v.filter(x => x !== s))} color="stone" />
+            : <p className="text-xs text-stone-400">No sub-industry exclusions set.</p>
+          }
+          <AddFromDropdown
+            label="Add sub-industry"
+            options={SUB_INDUSTRY_OPTIONS}
+            existing={exSubIndustries}
+            onAdd={s => { if (!exSubIndustries.includes(s)) setExSubIndustries(v => [...v, s]) }}
+            searchable
+          />
+          <div className="text-[10px] text-stone-400 mt-1">
+            {GICS_SUB_INDUSTRIES.length} GICS sub-industries · type to search
+          </div>
+        </div>
+      </Section>
+
+      {/* ── 3. Country Exclusions ── */}
       <Section icon={Globe} title="Country Exclusions" sub="Companies domiciled in excluded countries are disqualified.">
         <div className="bg-white border border-stone-150 rounded-sm shadow-luxury p-5 space-y-4">
           <ChipList
@@ -318,10 +359,14 @@ export default function FiltersPage() {
           />
           <AddFromDropdown
             label="Add country"
-            options={COUNTRY_OPTIONS}
+            options={ALL_COUNTRIES}
             existing={exCountries}
             onAdd={c => setExCountries(v => [...v, c])}
+            searchable
           />
+          <div className="text-[10px] text-stone-400 mt-1">
+            {ALL_COUNTRIES.length} countries (ISO 3166-1) · type to search
+          </div>
         </div>
       </Section>
 
