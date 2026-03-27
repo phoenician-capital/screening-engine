@@ -63,19 +63,25 @@ _SCREENING_LOCK = threading.Lock()
 
 @router.get("/recommendations")
 async def get_recommendations(limit: int = Query(500, le=1000)):
-    """Top-ranked recommendations with company and metric data."""
+    """Top-ranked recommendations with company and metric data — portfolio holdings excluded."""
     engine, factory = _make_session()
     try:
         async with factory() as session:
             from src.db.repositories.recommendation_repo import RecommendationRepository
             from src.db.repositories.company_repo import CompanyRepository
             from src.db.repositories.metric_repo import MetricRepository
+            from src.db.repositories.portfolio_repo import PortfolioRepository
 
-            rec_repo = RecommendationRepository(session)
-            co_repo  = CompanyRepository(session)
-            met_repo = MetricRepository(session)
+            rec_repo  = RecommendationRepository(session)
+            co_repo   = CompanyRepository(session)
+            met_repo  = MetricRepository(session)
+            port_repo = PortfolioRepository(session)
 
-            recs = await rec_repo.get_top_ranked(limit=limit)
+            portfolio_holdings = await port_repo.get_active()
+            portfolio_tickers  = {h.ticker for h in portfolio_holdings}
+
+            all_recs = await rec_repo.get_top_ranked(limit=limit)
+            recs = [r for r in all_recs if r.ticker not in portfolio_tickers]
             rows = []
             for r in recs:
                 co  = await co_repo.get_by_ticker(r.ticker)

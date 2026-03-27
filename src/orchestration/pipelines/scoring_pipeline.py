@@ -118,9 +118,21 @@ class ScoringPipeline:
         self.session.add(scoring_run)
         await self.session.flush()
 
-        # Never clear recommendations — accumulate across runs and re-rank all.
-        # Each run adds new companies, then all are re-ranked together.
-        logger.info("Accumulating results — existing recommendations preserved")
+        # Purge stale duplicate recommendations — keep only one row per ticker
+        # (the one with the highest rank_score). This runs before adding new results.
+        from sqlalchemy import delete as _delete_stmt, text as _text
+        await self.session.execute(_text("""
+            DELETE FROM recommendations
+            WHERE id NOT IN (
+                SELECT DISTINCT ON (ticker) id
+                FROM recommendations
+                WHERE rank_score IS NOT NULL
+                ORDER BY ticker, rank_score DESC NULLS LAST
+            )
+            AND rank_score IS NOT NULL
+        """))
+        await self.session.flush()
+        logger.info("Deduped recommendations — one row per ticker retained")
 
         # 2. Get universe
         if tickers:
@@ -131,6 +143,16 @@ class ScoringPipeline:
                     companies.append(c)
         else:
             companies = await self.company_repo.get_active()
+
+        # Exclude portfolio holdings from universe screening — they are tracked separately
+        if not tickers:
+            portfolio_holdings = await self.portfolio_repo.get_active()
+            portfolio_tickers  = {h.ticker for h in portfolio_holdings}
+            before = len(companies)
+            companies = [c for c in companies if c.ticker not in portfolio_tickers]
+            excluded_count = before - len(companies)
+            if excluded_count:
+                logger.info("Excluded %d portfolio holdings from universe screening", excluded_count)
 
         logger.info("Scoring pipeline: %d companies to evaluate", len(companies))
 
