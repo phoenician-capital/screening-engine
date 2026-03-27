@@ -700,3 +700,30 @@ async def get_stats():
             }
     finally:
         await engine.dispose()
+
+
+@router.post("/screening/reset-db")
+async def reset_screening_db():
+    """Wipe all screening data (companies, metrics, recommendations, documents).
+    Safe to call between runs. Does not affect portfolio_holdings or feedback."""
+    import psycopg2
+    from src.config.settings import settings as _s
+    try:
+        conn = psycopg2.connect(
+            host=_s.db.host, port=_s.db.port,
+            dbname=_s.db.name, user=_s.db.user,
+            password=_s.db.password,
+            sslmode="require" if _s.db.ssl else "prefer",
+            connect_timeout=10,
+        )
+        conn.autocommit = True
+        cur = conn.cursor()
+        cur.execute("SET session_replication_role = replica")
+        cur.execute("TRUNCATE TABLE recommendations, metrics, scoring_runs, documents, insider_purchases CASCADE")
+        cur.execute("DELETE FROM companies")
+        cur.execute("SET session_replication_role = DEFAULT")
+        cur.close()
+        conn.close()
+        return {"ok": True, "message": "Screening data wiped — ready for fresh run"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
