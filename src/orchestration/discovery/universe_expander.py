@@ -100,15 +100,41 @@ class UniverseExpander:
                 temperature=0.1,
                 max_searches=1,
             )
-            # Parse JSON array from response
+            # Parse JSON array — ask Claude to extract it cleanly if direct parse fails
             text = response.strip()
-            start = text.find("[")
-            end   = text.rfind("]")
-            if start != -1 and end != -1:
-                tickers = _json.loads(text[start:end+1])
+            tickers = None
+            # Try direct parse first
+            try:
+                start = text.find("[")
+                end   = text.rfind("]")
+                if start != -1 and end != -1:
+                    tickers = _json.loads(text[start:end+1])
+            except (_json.JSONDecodeError, Exception):
+                pass
+
+            # Fallback: ask Claude to extract just the JSON array from its own response
+            if tickers is None:
+                logger.info("Pre-screen JSON parse failed — asking Claude to re-extract array")
+                extraction_prompt = (
+                    f"Extract only the JSON array of ticker symbols from the text below. "
+                    f"Return ONLY the JSON array, nothing else. No markdown, no explanation.\n\n{text[:6000]}"
+                )
+                clean = await complete_with_search(
+                    prompt=extraction_prompt,
+                    model=settings.llm.primary_model,
+                    max_tokens=4000,
+                    temperature=0.0,
+                    max_searches=0,
+                )
+                clean = clean.strip()
+                start = clean.find("[")
+                end   = clean.rfind("]")
+                if start != -1 and end != -1:
+                    tickers = _json.loads(clean[start:end+1])
+
+            if tickers:
                 tickers = [t.strip().upper() for t in tickers if isinstance(t, str)]
                 logger.info("Claude pre-screen returned %d tickers (no cap applied)", len(tickers))
-                # No artificial cap — Claude decides how many to select
                 return tickers
         except Exception as e:
             logger.warning("Claude pre-screen failed: %s — falling back to random sample", e)
