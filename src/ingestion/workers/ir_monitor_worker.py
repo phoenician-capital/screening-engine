@@ -115,21 +115,17 @@ class IRMonitorWorker:
 
     async def _ensure_company_stubs(self, holdings, session: AsyncSession) -> None:
         """Upsert minimal company records for portfolio holdings so FK on documents passes."""
-        from sqlalchemy import select
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
         from src.db.models.company import Company
 
         for h in holdings:
-            result = await session.execute(
-                select(Company.ticker).where(Company.ticker == h.ticker).limit(1)
-            )
-            if result.scalar_one_or_none() is None:
-                stub = Company(
-                    ticker=h.ticker,
-                    name=h.name or h.ticker,
-                    exchange="",
-                    country="",
-                    gics_sector=h.sector or "",
-                    is_active=False,  # not in screening universe — portfolio-only
-                )
-                session.add(stub)
+            stmt = pg_insert(Company).values(
+                ticker=h.ticker,
+                name=h.name or h.ticker,
+                exchange="",
+                country="",
+                gics_sector=h.sector or "",
+                is_active=False,
+            ).on_conflict_do_nothing(index_elements=["ticker"])
+            await session.execute(stmt)
         await session.flush()
