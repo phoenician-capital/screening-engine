@@ -1,0 +1,68 @@
+name: Deploy to ECS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-north-1
+
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin $(aws sts get-caller-identity --query Account --output text).dkr.ecr.eu-north-1.amazonaws.com
+
+      - name: Build Docker image
+        run: |
+          docker build -t screening-engine:${{ github.sha }} .
+          docker tag screening-engine:${{ github.sha }} screening-engine:latest
+
+      - name: Push to ECR
+        run: |
+          ECR_URI=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.eu-north-1.amazonaws.com/screening-engine
+          docker tag screening-engine:latest $ECR_URI:latest
+          docker tag screening-engine:latest $ECR_URI:${{ github.sha }}
+          docker push $ECR_URI:latest
+          docker push $ECR_URI:${{ github.sha }}
+
+      - name: Update ECS service
+        run: |
+          aws ecs update-service \
+            --cluster screening-engine-cluster \
+            --service screening-engine-service \
+            --force-new-deployment \
+            --region eu-north-1
+
+      - name: Wait for deployment
+        run: |
+          for i in {1..60}; do
+            RUNNING=$(aws ecs describe-services --cluster screening-engine-cluster --services screening-engine-service --region eu-north-1 --query 'services[0].runningCount' --output text)
+            DESIRED=$(aws ecs describe-services --cluster screening-engine-cluster --services screening-engine-service --region eu-north-1 --query 'services[0].desiredCount' --output text)
+            if [ "$RUNNING" -eq "$DESIRED" ]; then
+              echo "✅ Deployment complete!"
+              exit 0
+            fi
+            echo "Running: $RUNNING / Desired: $DESIRED"
+            sleep 3
+          done
+          echo "⚠️  Deployment timeout"
+
+      - name: Deployment summary
+        run: |
+          echo "✨ Deployment complete!"
+          aws ecs describe-services --cluster screening-engine-cluster --services screening-engine-service --region eu-north-1 --query 'services[0].[serviceName,desiredCount,runningCount,deployments[0].status]' --output table

@@ -1,0 +1,133 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'ECS Cluster + Service for Screening Engine'
+
+Parameters:
+  InstanceId:
+    Type: String
+    Default: i-08bd901b0a0efefad
+    Description: EC2 instance ID to run ECS tasks on
+
+Resources:
+  # ECS Cluster
+  ScreeningEngineCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: screening-engine-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+
+  # Task Definition
+  ScreeningEngineTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: screening-engine
+      NetworkMode: host
+      RequiresCompatibilities:
+        - EC2
+      Cpu: '2048'
+      Memory: '4096'
+      ContainerDefinitions:
+        - Name: screening-engine-api
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/screening-engine:latest'
+          PortMappings:
+            - ContainerPort: 8000
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: ecs
+          Environment:
+            - Name: DB_HOST
+              Value: localhost
+            - Name: DB_PORT
+              Value: '5432'
+            - Name: DB_NAME
+              Value: phoenician
+          HealthCheck:
+            Command:
+              - CMD-SHELL
+              - curl -f http://localhost:8000/api/v1/screening/status || exit 1
+            Interval: 30
+            Timeout: 10
+            Retries: 3
+            StartPeriod: 60
+
+  # ECS Service
+  ScreeningEngineService:
+    Type: AWS::ECS::Service
+    Properties:
+      ServiceName: screening-engine-service
+      Cluster: !Ref ScreeningEngineCluster
+      TaskDefinition: !Ref ScreeningEngineTaskDefinition
+      DesiredCount: 1
+      LaunchType: EC2
+      DeploymentConfiguration:
+        MaximumPercent: 200
+        MinimumHealthyPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+
+  # CloudWatch Log Group
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/screening-engine
+      RetentionInDays: 7
+
+  # CloudWatch Alarms
+  ServiceCPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: screening-engine-high-cpu
+      MetricName: CPUUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ServiceName
+          Value: !GetAtt ScreeningEngineService.Name
+        - Name: ClusterName
+          Value: !Ref ScreeningEngineCluster
+
+  ServiceMemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: screening-engine-high-memory
+      MetricName: MemoryUtilization
+      Namespace: AWS/ECS
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 80
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: ServiceName
+          Value: !GetAtt ScreeningEngineService.Name
+        - Name: ClusterName
+          Value: !Ref ScreeningEngineCluster
+
+Outputs:
+  ClusterName:
+    Description: ECS Cluster Name
+    Value: !Ref ScreeningEngineCluster
+    Export:
+      Name: screening-engine-cluster
+
+  ServiceName:
+    Description: ECS Service Name
+    Value: !GetAtt ScreeningEngineService.Name
+    Export:
+      Name: screening-engine-service
+
+  LogGroup:
+    Description: CloudWatch Log Group
+    Value: !Ref ECSLogGroup
+    Export:
+      Name: screening-engine-log-group
