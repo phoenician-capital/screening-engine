@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
-import { CheckCircle, Loader, AlertCircle } from 'lucide-react'
 import clsx from 'clsx'
 import { api } from '../api'
+import AgentVisualization from '../components/AgentVisualization'
+import ScreeningProgress from '../components/ScreeningProgress'
 import ScorePill from '../components/ScorePill'
 
 const fmtCap = v => {
@@ -10,34 +11,6 @@ const fmtCap = v => {
   if (v >= 1e9) return `$${(v/1e9).toFixed(1)}B`
   if (v >= 1e6) return `$${(v/1e6).toFixed(0)}M`
   return `$${v.toLocaleString()}`
-}
-
-function Step({ n, label, status, detail }) {
-  const icons = {
-    waiting: <span className="w-6 h-6 rounded-full border-2 border-stone-200 flex items-center justify-center font-mono text-xs text-stone-300">{n}</span>,
-    running: <span className="w-6 h-6 rounded-full border-2 border-gold-400 flex items-center justify-center"><Loader size={12} className="text-gold-500 animate-spin" /></span>,
-    done:    <span className="w-6 h-6 rounded-full bg-emerald-500 flex items-center justify-center"><CheckCircle size={12} className="text-white" /></span>,
-    error:   <span className="w-6 h-6 rounded-full bg-red-500 flex items-center justify-center"><AlertCircle size={12} className="text-white" /></span>,
-  }
-
-  return (
-    <div className={clsx(
-      'flex items-center gap-4 px-5 py-3 transition-colors',
-      status === 'running' && 'bg-gold-50/40'
-    )}>
-      <div className="flex-shrink-0">{icons[status] ?? icons.waiting}</div>
-      <div className="flex-1 min-w-0">
-        <span className={clsx(
-          'text-sm transition-colors',
-          status === 'running' ? 'text-stone-900 font-semibold' :
-          status === 'done'    ? 'text-stone-500' : 'text-stone-300'
-        )}>
-          {label}
-        </span>
-        {detail && <span className="ml-2 text-xs text-stone-400 font-mono">{detail}</span>}
-      </div>
-    </div>
-  )
 }
 
 function MiniTable({ rows }) {
@@ -91,10 +64,13 @@ function MiniTable({ rows }) {
 
 export default function ScreeningPage() {
   const [maxCompanies, setMaxCompanies] = useState(20)
-  const [job, setJob]                   = useState(null)
-  const [topN, setTopN]                 = useState(null)
-  const [starting, setStarting]         = useState(false)
+  const [job, setJob] = useState(null)
+  const [topN, setTopN] = useState(null)
+  const [starting, setStarting] = useState(false)
+  const [events, setEvents] = useState([])
+  const [view, setView] = useState('progress') // 'progress' or 'agents'
 
+  // Poll job status
   useEffect(() => {
     api.screeningStatus().then(s => {
       if (s && (s.running || s.done)) setJob(s)
@@ -102,29 +78,61 @@ export default function ScreeningPage() {
     }).catch(() => {})
   }, [])
 
+  // Subscribe to SSE events
+  useEffect(() => {
+    const eventSource = new EventSource('/api/v1/screening/events')
+
+    const handleMessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        setEvents(prev => [...prev, data])
+      } catch (e) {
+        console.error('Failed to parse SSE event:', e)
+      }
+    }
+
+    eventSource.addEventListener('message', handleMessage)
+
+    return () => {
+      eventSource.removeEventListener('message', handleMessage)
+      eventSource.close()
+    }
+  }, [])
+
+  // Poll job status during run
   useEffect(() => {
     if (!job?.running) return
     const id = setInterval(async () => {
       try {
         const s = await api.screeningStatus()
         setJob(s)
-        if (s.done && !s.running) { clearInterval(id); loadTopN() }
+        if (s.done && !s.running) {
+          clearInterval(id)
+          loadTopN()
+        }
       } catch {}
     }, 3500)
     return () => clearInterval(id)
   }, [job?.running])
 
   const loadTopN = async () => {
-    try { setTopN(await api.recommendations(10)) } catch {}
+    try {
+      setTopN(await api.recommendations(10))
+    } catch {}
   }
 
   const startRun = async () => {
     setStarting(true)
     setTopN(null)
+    setEvents([])
+    setView('agents') // Switch to agent visualization when running
     try {
       const res = await api.startScreening(maxCompanies)
-      if (res.ok) setJob(await api.screeningStatus())
-      else alert(res.message)
+      if (res.ok) {
+        setJob(await api.screeningStatus())
+      } else {
+        alert(res.message)
+      }
     } catch (e) {
       alert(`Failed to start: ${e.message}`)
     } finally {
@@ -132,39 +140,30 @@ export default function ScreeningPage() {
     }
   }
 
-  const stepStatus = n => {
-    if (!job) return 'waiting'
-    if (job.error) return n <= job.step ? (n < job.step ? 'done' : 'error') : 'waiting'
-    if (job.done) return 'done'
-    if (job.step === n) return 'running'
-    if (job.step > n) return 'done'
-    return 'waiting'
-  }
-
-  const STEPS = [
-    { label: 'Discover companies',   detail: job?.d1 },
-    { label: 'Score with AI analyst', detail: job?.d2 },
-    { label: 'Rank & persist',        detail: job?.d3 },
-  ]
+  const isRunning = job?.running
+  const isDone = job?.done
 
   return (
-    <div className="px-10 pt-10 pb-16 max-w-2xl">
+    <div className="px-10 pt-10 pb-16">
       <div className="mb-8">
         <div className="section-label mb-2">Engine</div>
         <h2 className="font-display text-4xl font-light text-stone-800">Run Screening</h2>
+        <p className="text-sm text-stone-500 mt-2">Watch the multi-agent system work in real-time</p>
       </div>
 
       {/* Controls */}
-      <div className="stat-card mb-5">
+      <div className="stat-card mb-6 max-w-sm">
         <div className="flex items-end gap-6 mb-5">
           <div>
             <label className="block text-xs text-stone-500 mb-1.5">Companies to screen</label>
             <input
               type="number"
-              min={5} max={500} step={5}
+              min={5}
+              max={500}
+              step={5}
               value={maxCompanies}
               onChange={e => setMaxCompanies(Math.min(500, Math.max(5, +e.target.value)))}
-              disabled={job?.running}
+              disabled={isRunning}
               className="w-24 py-2 px-3 text-sm font-mono bg-stone-50 border border-stone-200 rounded-xs
                          focus:outline-none focus:border-gold-400 disabled:opacity-40"
             />
@@ -173,63 +172,90 @@ export default function ScreeningPage() {
 
         <button
           onClick={startRun}
-          disabled={job?.running || starting}
+          disabled={isRunning || starting}
           className={clsx(
             'w-full py-2.5 text-sm font-semibold rounded-xs transition-all',
-            job?.running || starting
+            isRunning || starting
               ? 'bg-stone-100 text-stone-400 cursor-not-allowed'
               : 'bg-stone-900 text-white hover:bg-stone-800 shadow-luxury'
           )}
         >
-          {job?.running ? 'Run in Progress…' : starting ? 'Starting…' : 'Execute Screening Run'}
+          {isRunning ? '⚙️ Run in Progress…' : starting ? '⏳ Starting…' : '▶ Execute Screening Run'}
         </button>
 
-        {job?.running && (
-          <p className="text-center text-xs text-stone-400 mt-2 font-mono">{job.elapsed ?? 0}s elapsed</p>
+        {isRunning && (
+          <p className="text-center text-xs text-stone-400 mt-2 font-mono">{job?.elapsed ?? 0}s elapsed</p>
         )}
       </div>
 
-      {/* Progress */}
-      {job && (
-        <motion.div
-          initial={{ opacity: 0, y: 4 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="bg-white border border-stone-150 rounded-sm shadow-luxury overflow-hidden mb-2"
-        >
-          <div className={clsx(
-            'px-5 py-2.5 border-b border-stone-100 flex items-center justify-between',
-            job.done && !job.error && 'bg-emerald-50',
-            job.error && 'bg-red-50',
-            job.running && 'bg-gold-50/50',
-          )}>
-            <span className={clsx(
-              'section-label',
-              job.done && !job.error && 'text-emerald-600',
-              job.error && 'text-red-500',
-              job.running && 'text-gold-600',
-            )}>
-              {job.error ? 'Failed' : job.done ? 'Complete' : 'Running'}
-            </span>
-            {job.done && !job.error && (
-              <span className="text-xs font-mono text-emerald-600">{job.elapsed}s · {job.scored} scored</span>
+      {/* View toggle — only show during/after run */}
+      {(isRunning || isDone) && (
+        <div className="flex gap-2 mb-6">
+          <button
+            onClick={() => setView('progress')}
+            className={clsx(
+              'px-4 py-2 text-sm font-medium rounded-xs transition',
+              view === 'progress'
+                ? 'bg-stone-900 text-white'
+                : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
             )}
-          </div>
+          >
+            📊 Progress
+          </button>
+          <button
+            onClick={() => setView('agents')}
+            className={clsx(
+              'px-4 py-2 text-sm font-medium rounded-xs transition',
+              view === 'agents'
+                ? 'bg-stone-900 text-white'
+                : 'bg-stone-100 text-stone-600 hover:bg-stone-200'
+            )}
+          >
+            🤖 Agents
+          </button>
+        </div>
+      )}
 
-          <div className="divide-y divide-stone-100">
-            {STEPS.map((s, i) => (
-              <Step key={i} n={i + 1} label={s.label} status={stepStatus(i + 1)} detail={s.detail} />
-            ))}
-          </div>
-
-          {job.error && (
-            <div className="px-5 py-3 bg-red-50 border-t border-red-100">
-              <p className="text-xs text-red-600 font-mono">{job.error}</p>
-            </div>
+      {/* Content */}
+      {isRunning || isDone ? (
+        <motion.div
+          key={view}
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="space-y-8"
+        >
+          {view === 'progress' && (
+            <ScreeningProgress status={job} events={events} />
           )}
+
+          {view === 'agents' && (
+            <AgentVisualization events={events} />
+          )}
+        </motion.div>
+      ) : null}
+
+      {/* Results */}
+      {isDone && !job?.error && (
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.5 }}
+        >
+          <MiniTable rows={topN} />
         </motion.div>
       )}
 
-      <MiniTable rows={topN} />
+      {/* Error */}
+      {job?.error && (
+        <motion.div
+          initial={{ opacity: 0, y: 10 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="p-4 bg-red-50 border border-red-200 rounded-lg text-red-700 text-sm"
+        >
+          <div className="font-semibold mb-1">❌ Screening failed</div>
+          <p className="font-mono text-xs">{job.error}</p>
+        </motion.div>
+      )}
     </div>
   )
 }

@@ -5,18 +5,21 @@ All endpoints are under /api/v1/
 from __future__ import annotations
 
 import asyncio
+import logging
 import threading
 import time
 import uuid as _uuid
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
-from fastapi.responses import JSONResponse
-from pydantic import BaseModel
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from src.config.settings import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/v1", tags=["api"])
 
@@ -55,6 +58,10 @@ def _fmt_cap(v) -> str:
 # ── Global screening job state ─────────────────────────────────────────────────
 _SCREENING_JOB: dict = {}
 _SCREENING_LOCK = threading.Lock()
+
+# ── SSE event streaming ────────────────────────────────────────────────────────
+import queue as _queue
+_SCREENING_EVENTS: _queue.Queue = _queue.Queue()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -186,6 +193,13 @@ async def get_recommendations(limit: int = Query(500, le=1000)):
 class FeedbackBody(BaseModel):
     action: str          # research_now | watch | reject
     reason: str | None = None
+    notes: str | None = None  # NEW: Rich analyst notes for learning
+
+    @field_validator('notes')
+    @classmethod
+    def _truncate_notes(cls, v):
+        """Soft cap at 2000 chars to prevent absurdly large notes."""
+        return v[:2000] if v else v
 
 
 @router.post("/recommendations/{ticker}/feedback")
@@ -195,6 +209,9 @@ async def submit_feedback(ticker: str, body: FeedbackBody):
         async with factory() as session:
             from src.db.models.feedback import Feedback
             from src.db.repositories.recommendation_repo import RecommendationRepository
+            from src.orchestration.pipelines.bidirectional_feedback_pipeline import (
+                BidirectionalFeedbackPipeline,
+            )
 
             repo = RecommendationRepository(session)
             rec  = await repo.get_latest_for_ticker(ticker)
@@ -206,12 +223,24 @@ async def submit_feedback(ticker: str, body: FeedbackBody):
                 ticker=ticker,
                 action=body.action,
                 reject_reason=body.reason,
+                notes=body.notes,  # NEW: Store analyst notes
             )
             session.add(fb)
 
             status_map = {"research_now": "researching", "watch": "watched", "reject": "rejected"}
             if body.action in status_map:
                 await repo.update_status(rec.id, status_map[body.action])
+
+            await session.flush()
+
+            # NEW: Trigger bidirectional learning pipeline
+            try:
+                pipeline = BidirectionalFeedbackPipeline(session)
+                await pipeline.process_feedback(fb)
+                logger.info(f"Bidirectional feedback learning triggered for {ticker}")
+            except Exception as e:
+                logger.error(f"Feedback learning failed for {ticker}: {e}")
+                # Don't block feedback submission on learning failure
 
             await session.commit()
             return {"ok": True, "ticker": ticker, "action": body.action}
@@ -262,6 +291,48 @@ class RunScreeningBody(BaseModel):
     max_companies: int = 20
 
 
+@router.get("/screening/events")
+async def screening_events():
+    """Server-Sent Events stream for real-time screening progress."""
+    async def event_generator():
+        while True:
+            try:
+                # Non-blocking get with timeout
+                event = _SCREENING_EVENTS.get(timeout=0.5)
+                import json as _json
+                yield f"data: {_json.dumps(event)}\n\n"
+            except _queue.Empty:
+                # Send heartbeat to keep connection alive
+                yield ": heartbeat\n\n"
+            except Exception as e:
+                logger.error(f"SSE error: {e}")
+                break
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+def _emit_event(event_type: str, data: dict | None = None, **kwargs):
+    """Emit an event to SSE stream."""
+    import json as _json
+    payload = {
+        "type": event_type,
+        "timestamp": time.time(),
+        **(data or {}),
+        **kwargs,
+    }
+    try:
+        _SCREENING_EVENTS.put_nowait(payload)
+    except _queue.Full:
+        pass  # Drop event if queue is full
+
+
 @router.post("/screening/run")
 async def start_screening(body: RunScreeningBody):
     """Kick off a background screening run."""
@@ -281,6 +352,7 @@ async def start_screening(body: RunScreeningBody):
         try:
             t0 = _SCREENING_JOB["t0"]
             _SCREENING_JOB.update({"step": 1, "step_label": "Discovering companies"})
+            _emit_event("screening_started", step=1, step_label="Discovering companies", timestamp=time.time())
 
             async def _discover():
                 from src.orchestration.discovery.universe_expander import UniverseExpander
@@ -298,8 +370,9 @@ async def start_screening(body: RunScreeningBody):
             _SCREENING_JOB.update({
                 "tickers_found": len(tickers),
                 "d1": f"{len(tickers)} candidates · {time.time()-t0:.0f}s",
-                "step": 2, "step_label": "Scoring with AI Analyst Agent",
+                "step": 2, "step_label": "Screening Selection Team",
             })
+            _emit_event("discovery_complete", tickers_found=len(tickers), elapsed=time.time()-t0)
 
             async def _score():
                 from src.orchestration.pipelines.scoring_pipeline import ScoringPipeline
@@ -319,13 +392,16 @@ async def start_screening(body: RunScreeningBody):
                 "d2": f"{_SCREENING_JOB['scored']} companies · {time.time()-t2:.1f}s",
                 "step": 3, "step_label": "Persisting results",
             })
+            _emit_event("screening_complete", scored=len(scored) if isinstance(scored, list) else 0, elapsed=time.time()-t2)
             _SCREENING_JOB.update({
                 "d3": "Rankings saved to database",
                 "done": True, "running": False,
                 "elapsed": round(time.time() - t0),
             })
+            _emit_event("screening_done", done=True, elapsed=round(time.time()-t0))
         except Exception as e:
             _SCREENING_JOB.update({"error": str(e), "done": True, "running": False})
+            _emit_event("screening_error", error=str(e))
 
     threading.Thread(target=_bg, daemon=False, name="api_screening_bg").start()
     return {"ok": True, "message": "Screening started"}
