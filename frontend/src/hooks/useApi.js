@@ -16,7 +16,7 @@ export function useApi(fetcher, deps = []) {
     } finally {
       setLoading(false)
     }
-  }, deps) // eslint-disable-line
+  }, [fetcher, ...deps])
 
   useEffect(() => { load() }, [load])
 
