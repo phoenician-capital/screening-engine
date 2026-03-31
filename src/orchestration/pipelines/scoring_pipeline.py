@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 import uuid
 from typing import Any
 
@@ -125,60 +126,195 @@ class ScoringPipeline:
         tickers: list[str] | None = None,
         run_type: str = "manual",
         bypass_data_check: bool = False,
+        on_progress: callable = None,
     ) -> list[dict[str, Any]]:
         """
-        Run the full scoring pipeline.
+        Run the full scoring pipeline with coordinator.
         If tickers not specified, scores all active companies.
+
+        Args:
+            tickers: Optional list of specific tickers to score
+            run_type: Type of run (manual, scheduled, portfolio_scan)
+            bypass_data_check: Skip financial data validation for portfolio scans
+            on_progress: Optional callback for progress updates (for SSE)
+
+        Returns:
+            List of scored companies as dicts
         """
-        # 1. Create scoring run record with full config snapshot
         from src.config.scoring_weights import load_scoring_weights
-        from sqlalchemy import delete
-        weights = load_scoring_weights()
-        scoring_run = ScoringRun(
-            run_type=run_type,
-            config_snapshot=weights,
-        )
-        self.session.add(scoring_run)
-        await self.session.flush()
+        from src.orchestration.workers.screening_coordinator import ScreeningCoordinator
+        from src.shared.scoring_state import ScreeningProgress
+        from sqlalchemy import text as _text
 
-        # Purge stale duplicate recommendations — keep only one row per ticker
-        # (the one with the highest rank_score). This runs before adding new results.
-        from sqlalchemy import delete as _delete_stmt, text as _text
-        await self.session.execute(_text("""
-            DELETE FROM recommendations
-            WHERE id NOT IN (
-                SELECT DISTINCT ON (ticker) id
-                FROM recommendations
-                WHERE rank_score IS NOT NULL
-                ORDER BY ticker, rank_score DESC NULLS LAST
+        t0 = time.time()
+        if on_progress is None:
+            on_progress = lambda p: logger.info(str(p))
+
+        try:
+            # 1. Create scoring run record with full config snapshot
+            weights = load_scoring_weights()
+            scoring_run = ScoringRun(
+                run_type=run_type,
+                config_snapshot=weights,
             )
-            AND rank_score IS NOT NULL
-        """))
-        await self.session.flush()
-        logger.info("Deduped recommendations — one row per ticker retained")
+            self.session.add(scoring_run)
+            await self.session.flush()
+            scoring_run_id = scoring_run.id
 
-        # 2. Get universe
-        if tickers:
-            companies = []
-            for t in tickers:
-                c = await self.company_repo.get_by_ticker(t)
-                if c:
-                    companies.append(c)
-        else:
-            companies = await self.company_repo.get_active()
+            on_progress(ScreeningProgress(step="init", status="starting"))
 
-        # Exclude portfolio holdings from universe screening — they are tracked separately
-        if not tickers:
-            portfolio_holdings = await self.portfolio_repo.get_active()
-            portfolio_tickers  = {h.ticker for h in portfolio_holdings}
-            before = len(companies)
-            companies = [c for c in companies if c.ticker not in portfolio_tickers]
-            excluded_count = before - len(companies)
-            if excluded_count:
-                logger.info("Excluded %d portfolio holdings from universe screening", excluded_count)
+            # Purge stale duplicate recommendations — keep only one row per ticker
+            await self.session.execute(_text("""
+                DELETE FROM recommendations
+                WHERE id NOT IN (
+                    SELECT DISTINCT ON (ticker) id
+                    FROM recommendations
+                    WHERE rank_score IS NOT NULL
+                    ORDER BY ticker, rank_score DESC NULLS LAST
+                )
+                AND rank_score IS NOT NULL
+            """))
+            await self.session.commit()
+            logger.info("Deduped recommendations — one row per ticker retained")
 
-        logger.info("Scoring pipeline: %d companies to evaluate", len(companies))
+            # 2. Get universe
+            if tickers:
+                companies = []
+                for t in tickers:
+                    c = await self.company_repo.get_by_ticker(t)
+                    if c:
+                        companies.append(c)
+            else:
+                companies = await self.company_repo.get_active()
 
+            # Exclude portfolio holdings from universe screening — they are tracked separately
+            if not tickers:
+                portfolio_holdings = await self.portfolio_repo.get_active()
+                portfolio_tickers  = {h.ticker for h in portfolio_holdings}
+                before = len(companies)
+                companies = [c for c in companies if c.ticker not in portfolio_tickers]
+                excluded_count = before - len(companies)
+                if excluded_count:
+                    logger.info("Excluded %d portfolio holdings from universe screening", excluded_count)
+
+            logger.info("Scoring pipeline: %d companies to evaluate", len(companies))
+            on_progress(ScreeningProgress(
+                step="discovery",
+                status="complete",
+                total_companies=len(companies),
+                elapsed_seconds=time.time() - t0,
+            ))
+
+            # 3. Use coordinator for robust parallel scoring
+            coordinator = ScreeningCoordinator()
+            results = await coordinator.run_screening(
+                companies=companies,
+                scoring_run_id=scoring_run_id,
+                on_progress=on_progress,
+            )
+
+        except Exception as e:
+            logger.exception(f"Scoring pipeline error: {e}")
+            on_progress(ScreeningProgress(
+                step="error",
+                status="failed",
+                error_message=str(e),
+                elapsed_seconds=time.time() - t0,
+            ))
+            raise
+
+        try:
+            # 4. Persist final ranking and metadata (using fresh session)
+            async def _finalize():
+                """Update scoring run with final stats and rank all recommendations."""
+                from sqlalchemy import select as _select, update as _update, text as _text
+                from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+                from sqlalchemy.pool import NullPool
+
+                # Use fresh session for finalization (avoid contamination)
+                engine = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
+                factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+                try:
+                    async with factory() as session:
+                        # Get all recommendations from this scoring run and re-rank globally
+                        all_recs = (await session.execute(
+                            _select(Recommendation)
+                            .where(Recommendation.rank_score.isnot(None))
+                            .where(Recommendation.rank_score > -50)
+                            .order_by(Recommendation.rank_score.desc())
+                        )).scalars().all()
+
+                        # Deduplicate: keep only best score per ticker
+                        seen_tickers: dict[str, Recommendation] = {}
+                        for rec in all_recs:
+                            if rec.ticker not in seen_tickers:
+                                seen_tickers[rec.ticker] = rec
+                            else:
+                                rec.rank = None
+
+                        deduped = list(seen_tickers.values())
+                        deduped.sort(key=lambda r: float(r.rank_score or 0), reverse=True)
+
+                        # Clear all ranks first
+                        await session.execute(_update(Recommendation).values(rank=None))
+
+                        # Assign new ranks
+                        for i, rec in enumerate(deduped, 1):
+                            rec.rank = i
+
+                        # Update scoring run stats
+                        scoring_run = await session.get(ScoringRun, scoring_run_id)
+                        if scoring_run:
+                            scoring_run.tickers_scored = len(companies)
+                            scoring_run.tickers_passed_filter = len(results)
+
+                        await session.commit()
+
+                        logger.info(
+                            "Scoring complete: %d scored, %d ranked in %.1f seconds",
+                            len(companies),
+                            len(deduped),
+                            time.time() - t0,
+                        )
+
+                        on_progress(ScreeningProgress(
+                            step="complete",
+                            status="success",
+                            total_ranked=len(deduped),
+                            elapsed_seconds=time.time() - t0,
+                        ))
+
+                        return deduped
+
+                finally:
+                    await engine.dispose()
+
+            ranked = await _finalize()
+
+        except Exception as e:
+            logger.exception(f"Ranking finalization error: {e}")
+            raise
+
+        return [
+            {
+                "rank": r.rank,
+                "ticker": r.ticker,
+                "fit_score": r.fit_score,
+                "risk_score": r.risk_score,
+                "rank_score": r.rank_score,
+            }
+            for r in ranked
+        ]
+
+    # ---- OLD IMPLEMENTATION (keeping for reference during transition) ----
+    async def _run_old(
+        self,
+        tickers: list[str] | None = None,
+        run_type: str = "manual",
+        bypass_data_check: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Legacy implementation - replaced by coordinator pattern."""
         # Load portfolio context once for all comparisons
         portfolio_avg = await self.portfolio_repo.get_avg_metrics()
         logger.info("Portfolio context: %d holdings loaded", portfolio_avg.get("holding_count", 0))

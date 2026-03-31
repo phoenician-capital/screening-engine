@@ -372,22 +372,38 @@ async def start_screening(body: RunScreeningBody):
             })
             _emit_event("discovery_complete", tickers_found=len(tickers), elapsed=time.time()-t0)
 
-            # Score companies
+            # Score companies with progress callback
             from src.orchestration.pipelines.scoring_pipeline import ScoringPipeline
+            from src.shared.scoring_state import ScreeningProgress
+
+            def _on_progress(progress: ScreeningProgress):
+                """Update job state and emit SSE event for progress updates."""
+                _SCREENING_JOB.update({
+                    "step": progress.step,
+                    "current_ticker": progress.current_ticker,
+                    "companies_scored": progress.companies_scored,
+                    "failed_companies": progress.failed_companies,
+                })
+                _emit_event("screening_progress", **progress.dict())
+
             eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
             fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
             try:
                 async with fac() as sess:
                     pipe = ScoringPipeline(sess)
                     t2 = time.time()
-                    scored = await pipe.run(tickers=tickers or None, run_type="manual")
+                    scored = await pipe.run(
+                        tickers=tickers or None,
+                        run_type="manual",
+                        on_progress=_on_progress,
+                    )
             finally:
                 await eng.dispose()
 
             _SCREENING_JOB.update({
                 "scored": len(scored) if isinstance(scored, list) else 0,
                 "d2": f"{_SCREENING_JOB['scored']} companies · {time.time()-t2:.1f}s",
-                "step": 3, "step_label": "Persisting results",
+                "step": "complete", "step_label": "Complete",
             })
             _emit_event("screening_complete", scored=len(scored) if isinstance(scored, list) else 0, elapsed=time.time()-t2)
             _SCREENING_JOB.update({
