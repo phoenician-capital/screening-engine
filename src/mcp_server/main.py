@@ -45,6 +45,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ── Serve React frontend static files ────────────────────────────
+# Mount static files BEFORE routers so /api/* routes take precedence
+frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
+if frontend_dist.exists():
+    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
+
 # ── Mount tool routers ───────────────────────────────────────────
 app.include_router(sec_router, prefix="/tools/sec_filings", tags=["sec_filings"])
 app.include_router(transcripts_router, prefix="/tools/transcripts", tags=["transcripts"])
@@ -57,11 +63,6 @@ app.include_router(scheduler_router, prefix="/tools/scheduler", tags=["scheduler
 
 # ── React frontend API ───────────────────────────────────────────
 app.include_router(api_router)
-
-# ── Serve React frontend static files ────────────────────────────
-frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
-if frontend_dist.exists():
-    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
 
 
 @app.get("/health")
