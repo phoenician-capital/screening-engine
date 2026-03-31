@@ -5,9 +5,11 @@ MCP Server — FastAPI application exposing all tools as endpoints.
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from src.shared.logging import setup_logging
 
@@ -55,6 +57,11 @@ app.include_router(scheduler_router, prefix="/tools/scheduler", tags=["scheduler
 
 # ── React frontend API ───────────────────────────────────────────
 app.include_router(api_router)
+
+# ── Serve React frontend static files ────────────────────────────
+frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
+if frontend_dist.exists():
+    app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
 
 
 @app.get("/health")

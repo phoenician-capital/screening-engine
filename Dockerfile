@@ -17,6 +17,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ src/
 COPY .env.example .env
 
+# Copy frontend dist files
+COPY frontend/dist frontend/dist
+
 # Health check (increased grace period to 30s for app initialization)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://localhost:8000/api/v1/screening/status || exit 1
