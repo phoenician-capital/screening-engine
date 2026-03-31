@@ -68,10 +68,10 @@ class Metric(Base):
     stock_based_compensation: Mapped[float | None] = mapped_column(Numeric)
     acquisitions_net: Mapped[float | None] = mapped_column(Numeric)
 
-    # Derived metrics for selection
-    buyback_to_fcf_ratio: Mapped[float | None] = mapped_column(Numeric)
-    stock_dilution_rate: Mapped[float | None] = mapped_column(Numeric)
-    organic_revenue_growth: Mapped[float | None] = mapped_column(Numeric)
+    # Derived metrics for selection (computed dynamically)
+    # buyback_to_fcf_ratio: Mapped[float | None] = mapped_column(Numeric)
+    # stock_dilution_rate: Mapped[float | None] = mapped_column(Numeric)
+    # organic_revenue_growth: Mapped[float | None] = mapped_column(Numeric)
 
     # Market data
     market_cap_usd: Mapped[float | None] = mapped_column(Numeric)
