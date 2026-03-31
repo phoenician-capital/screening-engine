@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /c/Phoenician Capital/Screening_Engine)",
+      "Bash(cd /c/Phoenician Capital/Screening_Engine/frontend)"
+    ]
+  }
+}

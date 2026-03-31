@@ -553,7 +553,7 @@ function ActionBtn({ label, color, active, disabled, onClick }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function ResultsPage() {
-  const { data: rows, loading, error, reload } = useApi(() => api.recommendations(500))
+  const { data: rows, loading, error, reload } = useApi(() => api.recommendations(100))
   const [selected, setSelected] = useState(null)
   const [filters, setFilters]   = useState({
     search: '', minFit: '0', maxRisk: '100', status: '', sector: '', sort: 'score'

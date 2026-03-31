@@ -69,7 +69,7 @@ _SCREENING_EVENTS: _queue.Queue = _queue.Queue()
 # ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/recommendations")
-async def get_recommendations(limit: int = Query(500, le=1000)):
+async def get_recommendations(limit: int = Query(100, le=1000)):
     """Top-ranked recommendations with company and metric data — portfolio holdings excluded."""
     engine, factory = _make_session()
     try:
@@ -87,8 +87,9 @@ async def get_recommendations(limit: int = Query(500, le=1000)):
             portfolio_holdings = await port_repo.get_active()
             portfolio_tickers  = {h.ticker for h in portfolio_holdings}
 
-            all_recs = await rec_repo.get_top_ranked(limit=limit)
-            recs = [r for r in all_recs if r.ticker not in portfolio_tickers]
+            # Fetch a larger batch to account for portfolio filtering
+            all_recs = await rec_repo.get_top_ranked(limit=min(limit * 2, 1000))
+            recs = [r for r in all_recs if r.ticker not in portfolio_tickers][:limit]
             rows = []
             for r in recs:
                 co  = await co_repo.get_by_ticker(r.ticker)

@@ -9,6 +9,12 @@ from src.db.models.scoring_run import ScoringRun
 from src.db.models.watchlist import WatchlistEntry
 from src.db.models.exclusion import Exclusion
 from src.db.models.portfolio import PortfolioHolding
+from src.db.models.learned_patterns import (
+    SelectionLearnedPattern,
+    ScoringLearnedPattern,
+    SelectionAgentDecision,
+    ScoringAgentDecision,
+)
 
 __all__ = [
     "Base",
@@ -22,4 +28,8 @@ __all__ = [
     "WatchlistEntry",
     "Exclusion",
     "PortfolioHolding",
+    "SelectionLearnedPattern",
+    "ScoringLearnedPattern",
+    "SelectionAgentDecision",
+    "ScoringAgentDecision",
 ]

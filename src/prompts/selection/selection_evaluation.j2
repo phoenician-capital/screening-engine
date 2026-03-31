@@ -1,0 +1,108 @@
+## SELECTION PIPELINE EVALUATION
+
+**Company:** {{ ticker }} ({{ company_name }})
+**Sector:** {{ sector }}
+
+### FILTER AGENT — Hard Metrics Gates
+
+**Metrics Provided:**
+- Gross Margin: {{ gross_margin | format('%.1%') or 'N/A' }}
+- ROIC: {{ roic | format('%.1%') or 'N/A' }}
+- 3Y Revenue Growth: {{ revenue_growth_3yr | format('%.1%') or 'N/A' }}
+- Net Debt / EBITDA: {{ net_debt_ebitda | format('%.1f') or 'N/A' }}x
+
+**Thresholds:**
+- Min Gross Margin: {{ min_gross_margin | format('%.0%') }}
+- Min ROIC: {{ min_roic | format('%.0%') }}
+- Min 3Y Growth: {{ min_growth | format('%.0%') }}
+- Max Leverage: {{ max_leverage | format('.1f') }}x
+
+**Assessment:** Evaluate each metric against threshold. FAIL if ANY falls below floor.
+
+---
+
+### BUSINESS MODEL AGENT — Clarity Check
+
+**Company Description:**
+> {{ description }}
+
+**Business Segments:**
+{% if segments %}
+{% for seg in segments %}
+- {{ seg.name }}: {{ seg.revenue_pct | format('%.0%') }} of revenue
+{% endfor %}
+{% else %}
+(No segment data available)
+{% endif %}
+
+**Assessment:** Can you explain this business in one sentence? If not, or if it's a conglomerate, FAIL.
+
+---
+
+### FOUNDER AGENT — Alignment Check
+
+**Founder/Insider Ownership:**
+- Founder Name: {{ founder_name or 'Unknown' }}
+- Founder Ownership: {{ founder_ownership | format('%.1%') or 'N/A' }}
+- Total Insider Ownership: {{ insider_ownership | format('%.1%') or 'N/A' }}
+- Recent Insider Buys (30d): {{ recent_insider_buys or 'N/A' }}
+
+**Assessment:** Check if ANY of:
+1. Founder owns ≥ 5%
+2. Insiders own ≥ 10%
+3. Recent insider buying activity
+
+---
+
+### GROWTH AGENT — Organic Growth Check
+
+**Growth Profile:**
+- Organic Revenue Growth: {{ organic_growth | format('%.1%') or 'N/A' }}
+- Total 3Y Revenue Growth: {{ revenue_growth | format('%.1%') or 'N/A' }}
+- Major Acquisitions (3Y): {{ major_acquisitions or 0 }}
+- Acquisition Spend: {{ acquisition_spend | format('$M') or 'N/A' }}
+- Free Cash Flow: {{ fcf | format('$M') or 'N/A' }}
+
+**Assessment:** Is growth organic (≥3%) or acquisition-dependent (>2 major M&A)? Check FCF conversion.
+
+---
+
+### RED FLAG AGENT — Red Flag Detection
+
+**Capital Allocation Concerns:**
+- Buyback to FCF Ratio: {{ buyback_fcf_ratio | format('x') or 'N/A' }}
+- Stock-Based Compensation: {{ sbc | format('$M') or 'N/A' }} ({{ sbc_to_revenue | format('%.1%') or 'N/A' }} of revenue)
+- Stock Dilution Rate: {{ dilution_rate | format('%.1%') or 'N/A' }}
+- APIC Growth vs RE Growth: {{ apic_vs_re | format('x') or 'N/A' }}
+
+**Cash Flow Concerns:**
+- FCF to CapEx: {{ fcf_to_capex | format('%.1%') or 'N/A' }}
+- Leverage: {{ leverage | format('.1f') or 'N/A' }}x ND/EBITDA
+
+**Learned Patterns (Recent Analyst Feedback):**
+{% if learned_patterns %}
+{% for pattern in learned_patterns %}
+- {{ pattern.issue }} (confidence: {{ pattern.confidence | format('%.0%') }})
+  Current: {{ pattern.current_value | format('x') }}, Suggested Threshold: {{ pattern.suggested_threshold | format('x') }}
+{% endfor %}
+{% else %}
+(No learned patterns yet — first run with this company)
+{% endif %}
+
+**Assessment:** Flag if:
+- Buyback > 1.0x FCF
+- Stock dilution > 2%
+- APIC growing faster than RE
+- FCF/CapEx < 50%
+- Leverage > 5.0x
+- OR learned pattern matches with high confidence
+
+---
+
+## FINAL DECISION
+
+After all 5 agents evaluate, company either:
+- ✓ **PASS** → Sent to Scoring Team for deep analysis
+- ✗ **FAIL** → Rejected from further consideration
+
+**Rejection Reason:** (If FAIL, provide reason from first failed agent)

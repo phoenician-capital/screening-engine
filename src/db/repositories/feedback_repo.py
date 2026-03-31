@@ -8,6 +8,7 @@ from typing import Sequence
 
 from sqlalchemy import func as sqlfunc
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 from src.db.models.feedback import Feedback
 from src.db.repositories.base_repo import BaseRepository
@@ -54,6 +55,7 @@ class FeedbackRepository(BaseRepository[Feedback]):
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         stmt = (
             select(Feedback)
+            .options(selectinload(Feedback.recommendation))
             .where(Feedback.created_at >= cutoff)
             .order_by(Feedback.created_at.desc())
         )
