@@ -37,34 +37,32 @@ Resources:
       Code:
         ZipFile: |
           import json
-          import boto3
+          import urllib3
 
-          ssm = boto3.client('ssm', region_name='eu-north-1')
+          http = urllib3.PoolManager()
 
           def lambda_handler(event, context):
               try:
                   payload = json.loads(event.get('body', '{}'))
                   if payload.get('ref') != 'refs/heads/main':
-                      return {'statusCode': 200, 'body': 'Skipped'}
+                      return {'statusCode': 200, 'body': json.dumps({'status': 'Skipped (not main branch)'})}
 
-                  response = ssm.send_command(
-                      InstanceIds=['i-08bd901b0a0efefad'],
-                      DocumentName='AWS-RunShellScript',
-                      Parameters={
-                          'command': [
-                              'cd ~/screening-engine',
-                              'git pull origin main',
-                              'docker compose restart mcp-server'
-                          ]
-                      }
-                  )
+                  # Call the API endpoint on EC2 to trigger deployment
+                  # The endpoint will git pull + restart docker
+                  url = 'http://13.49.7.145:8000/admin/redeploy'
+                  headers = {'Content-Type': 'application/json'}
+
+                  response = http.request('POST', url, body=json.dumps({}), headers=headers)
 
                   return {
                       'statusCode': 200,
-                      'body': json.dumps({'status': 'Deployed'})
+                      'body': json.dumps({'status': 'Deploy triggered', 'response': response.status})
                   }
               except Exception as e:
-                  return {'statusCode': 500, 'body': str(e)}
+                  return {
+                      'statusCode': 500,
+                      'body': json.dumps({'error': str(e)})
+                  }
 
   # API Gateway for webhook
   DeployWebhookApi:

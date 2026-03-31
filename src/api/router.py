@@ -819,6 +819,23 @@ async def get_stats():
         await engine.dispose()
 
 
+@router.post("/admin/redeploy")
+async def trigger_redeploy():
+    """Trigger git pull + docker restart in background."""
+    import subprocess
+    try:
+        subprocess.Popen(
+            ["bash", "-c", "cd ~/screening-engine && git pull origin main && docker compose restart mcp-server"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+            preexec_fn=lambda: None
+        )
+        return {"ok": True, "message": "Redeploy triggered — API will restart in 10 seconds"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
+
+
 @router.post("/screening/reset-db")
 async def reset_screening_db():
     """Wipe all screening data (companies, metrics, recommendations, documents).
