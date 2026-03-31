@@ -37,32 +37,30 @@ Resources:
       Code:
         ZipFile: |
           import json
-          import urllib3
-
-          http = urllib3.PoolManager()
+          import urllib.request
+          import urllib.error
 
           def lambda_handler(event, context):
               try:
                   payload = json.loads(event.get('body', '{}'))
                   if payload.get('ref') != 'refs/heads/main':
-                      return {'statusCode': 200, 'body': json.dumps({'status': 'Skipped (not main branch)'})}
+                      return {'statusCode': 200, 'body': json.dumps({'status': 'Skipped'})}
 
-                  # Call the API endpoint on EC2 to trigger deployment
-                  # The endpoint will git pull + restart docker
+                  # Call EC2 API to trigger deploy
                   url = 'http://13.49.7.145:8000/admin/redeploy'
-                  headers = {'Content-Type': 'application/json'}
+                  data = json.dumps({}).encode('utf-8')
+                  request = urllib.request.Request(url, data=data, method='POST')
+                  request.add_header('Content-Type', 'application/json')
 
-                  response = http.request('POST', url, body=json.dumps({}), headers=headers)
+                  try:
+                      with urllib.request.urlopen(request, timeout=5) as response:
+                          return {'statusCode': 200, 'body': json.dumps({'status': 'Deploy triggered'})}
+                  except urllib.error.URLError:
+                      # Timeout is OK — deploy is async
+                      return {'statusCode': 200, 'body': json.dumps({'status': 'Deploy initiated'})}
 
-                  return {
-                      'statusCode': 200,
-                      'body': json.dumps({'status': 'Deploy triggered', 'response': response.status})
-                  }
               except Exception as e:
-                  return {
-                      'statusCode': 500,
-                      'body': json.dumps({'error': str(e)})
-                  }
+                  return {'statusCode': 500, 'body': json.dumps({'error': str(e)})}
 
   # API Gateway for webhook
   DeployWebhookApi:
