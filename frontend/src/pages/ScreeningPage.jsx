@@ -80,39 +80,22 @@ export default function ScreeningPage() {
 
   // Subscribe to SSE events
   useEffect(() => {
-    let eventSource = null
+    const eventSource = new EventSource('/api/v1/screening/events')
 
-    const connectSSE = () => {
-      eventSource = new EventSource('/api/v1/screening/events')
-
-      const handleMessage = (event) => {
-        try {
-          const data = JSON.parse(event.data)
-          setEvents(prev => [...prev, data])
-        } catch (e) {
-          console.error('Failed to parse SSE event:', e)
-        }
+    const handleMessage = (event) => {
+      try {
+        const data = JSON.parse(event.data)
+        setEvents(prev => [...prev, data])
+      } catch (e) {
+        console.error('Failed to parse SSE event:', e)
       }
-
-      const handleError = () => {
-        console.error('SSE connection error')
-        if (eventSource) {
-          eventSource.close()
-        }
-        // Attempt reconnect after 5s
-        setTimeout(() => connectSSE(), 5000)
-      }
-
-      eventSource.addEventListener('message', handleMessage)
-      eventSource.addEventListener('error', handleError)
     }
 
-    connectSSE()
+    eventSource.addEventListener('message', handleMessage)
 
     return () => {
-      if (eventSource) {
-        eventSource.close()
-      }
+      eventSource.removeEventListener('message', handleMessage)
+      eventSource.close()
     }
   }, [])
 
