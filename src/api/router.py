@@ -542,93 +542,64 @@ async def get_portfolio():
     engine, factory = _make_session()
     try:
         async with factory() as session:
-            try:
-                from src.db.repositories.portfolio_repo import PortfolioRepository
-                from src.db.repositories import MetricRepository, RecommendationRepository
-                repo     = PortfolioRepository(session)
-                m_repo   = MetricRepository(session)
-                rec_repo = RecommendationRepository(session)
+            from src.db.repositories.portfolio_repo import PortfolioRepository
+            from src.db.repositories import MetricRepository, RecommendationRepository
+            repo     = PortfolioRepository(session)
+            m_repo   = MetricRepository(session)
+            rec_repo = RecommendationRepository(session)
 
-                holdings = await repo.get_active()
-                avg      = await repo.get_avg_metrics()
+            holdings = await repo.get_active()
+            avg      = await repo.get_avg_metrics()
 
-                if not holdings:
-                    logger.info("No active portfolio holdings found")
-                    return {"holdings": [], "summary": avg or {}}
+            rows = []
+            for h in holdings:
+                metrics = await m_repo.get_latest(h.ticker)
+                rec     = await rec_repo.get_latest_for_ticker(h.ticker)
 
-                # Batch fetch metrics and recommendations instead of N+2 queries
-                tickers = [h.ticker for h in holdings]
-                try:
-                    metrics_dict = await m_repo.get_many_latest(tickers) if hasattr(m_repo, 'get_many_latest') else {}
-                    recs_dict = await rec_repo.get_many_latest_for_tickers(tickers) if hasattr(rec_repo, 'get_many_latest_for_tickers') else {}
-                except Exception as e:
-                    logger.warning(f"Batch fetch failed: {e}, falling back to individual queries")
-                    metrics_dict, recs_dict = {}, {}
+                # Parse thesis / verdict / diligence from analyst_thesis criterion
+                thesis = verdict = None
+                diligence = []
+                if rec and rec.scoring_detail:
+                    criteria = rec.scoring_detail.get("criteria", [])
+                    for c in criteria:
+                        if c.get("name") == "analyst_thesis":
+                            ev = c.get("evidence", "")
+                            if "THESIS:" in ev:
+                                parts = ev.split("|")
+                                for p in parts:
+                                    p = p.strip()
+                                    if p.startswith("THESIS:"):
+                                        thesis = p[7:].strip()
+                                    elif p.startswith("DILIGENCE:"):
+                                        diligence = [q.strip() for q in p[10:].split("|") if q.strip()]
+                                    elif p.startswith("VERDICT:"):
+                                        verdict = p[8:].strip()
+                            break
 
-                rows = []
-                for h in holdings:
-                    try:
-                        # Use batch results if available, otherwise fall back to single queries
-                        metrics = metrics_dict.get(h.ticker) if metrics_dict else None
-                        if not metrics:
-                            metrics = await m_repo.get_latest(h.ticker)
+                rows.append({
+                    "ticker":        h.ticker,
+                    "name":          h.name,
+                    "sector":        h.sector or (metrics and getattr(metrics, "gics_sector", None)),
+                    "date_added":    h.date_added.isoformat() if h.date_added else None,
+                    # Scored signals
+                    "fit_score":     _f(rec.fit_score)   if rec else None,
+                    "risk_score":    _f(rec.risk_score)  if rec else None,
+                    "rank_score":    _f(rec.rank_score)  if rec else None,
+                    "rank":          rec.rank             if rec else None,
+                    "verdict":       verdict,
+                    "thesis":        thesis,
+                    "diligence":     diligence,
+                    # Live metrics
+                    "gross_margin":      _pct(metrics.gross_margin)         if metrics and metrics.gross_margin      else None,
+                    "roic":              _pct(metrics.roic)                  if metrics and metrics.roic              else None,
+                    "revenue_growth":    _pct(metrics.revenue_growth_yoy)   if metrics and metrics.revenue_growth_yoy else None,
+                    "fcf_yield":         _pct(metrics.fcf_yield)             if metrics and metrics.fcf_yield          else None,
+                    "net_debt_ebitda":   _f(metrics.net_debt_ebitda)         if metrics and metrics.net_debt_ebitda   else None,
+                    "market_cap":        _f(metrics.market_cap_usd)          if metrics and metrics.market_cap_usd    else None,
+                    "ev_ebit":           _f(metrics.ev_ebit)                  if metrics and metrics.ev_ebit           else None,
+                })
 
-                        rec = recs_dict.get(h.ticker) if recs_dict else None
-                        if not rec:
-                            rec = await rec_repo.get_latest_for_ticker(h.ticker)
-
-                        # Parse thesis / verdict / diligence from analyst_thesis criterion
-                        thesis = verdict = None
-                        diligence = []
-                        if rec and rec.scoring_detail:
-                            criteria = rec.scoring_detail.get("criteria", [])
-                            for c in criteria:
-                                if c.get("name") == "analyst_thesis":
-                                    ev = c.get("evidence", "")
-                                    if "THESIS:" in ev:
-                                        parts = ev.split("|")
-                                        for p in parts:
-                                            p = p.strip()
-                                            if p.startswith("THESIS:"):
-                                                thesis = p[7:].strip()
-                                            elif p.startswith("DILIGENCE:"):
-                                                diligence = [q.strip() for q in p[10:].split("|") if q.strip()]
-                                            elif p.startswith("VERDICT:"):
-                                                verdict = p[8:].strip()
-                                    break
-
-                        rows.append({
-                            "ticker":        h.ticker,
-                            "name":          h.name,
-                            "sector":        h.sector or (metrics and getattr(metrics, "gics_sector", None)),
-                            "date_added":    h.date_added.isoformat() if h.date_added else None,
-                            # Scored signals
-                            "fit_score":     _f(rec.fit_score)   if rec else None,
-                            "risk_score":    _f(rec.risk_score)  if rec else None,
-                            "rank_score":    _f(rec.rank_score)  if rec else None,
-                            "rank":          rec.rank             if rec else None,
-                            "verdict":       verdict,
-                            "thesis":        thesis,
-                            "diligence":     diligence,
-                            # Live metrics
-                            "gross_margin":      _pct(metrics.gross_margin)         if metrics and metrics.gross_margin      else None,
-                            "roic":              _pct(metrics.roic)                  if metrics and metrics.roic              else None,
-                            "revenue_growth":    _pct(metrics.revenue_growth_yoy)   if metrics and metrics.revenue_growth_yoy else None,
-                            "fcf_yield":         _pct(metrics.fcf_yield)             if metrics and metrics.fcf_yield          else None,
-                            "net_debt_ebitda":   _f(metrics.net_debt_ebitda)         if metrics and metrics.net_debt_ebitda   else None,
-                            "market_cap":        _f(metrics.market_cap_usd)          if metrics and metrics.market_cap_usd    else None,
-                            "ev_ebit":           _f(metrics.ev_ebit)                  if metrics and metrics.ev_ebit           else None,
-                        })
-                    except Exception as e:
-                        logger.error(f"Error processing holding {h.ticker}: {e}")
-                        # Skip this holding and continue with others
-                        continue
-
-                logger.info(f"Returned {len(rows)} portfolio holdings")
-                return {"holdings": rows, "summary": avg or {}}
-            except Exception as e:
-                logger.error(f"Portfolio endpoint error: {e}", exc_info=True)
-                raise HTTPException(500, f"Failed to fetch portfolio: {str(e)}")
+            return {"holdings": rows, "summary": avg}
     finally:
         await engine.dispose()
 
