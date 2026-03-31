@@ -36,6 +36,25 @@ class RecommendationRepository(BaseRepository[Recommendation]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_many_latest_for_tickers(self, tickers: list[str]) -> dict[str, Recommendation | None]:
+        """Batch fetch latest recommendations for multiple tickers."""
+        if not tickers:
+            return {}
+        stmt = (
+            select(Recommendation)
+            .where(Recommendation.ticker.in_(tickers))
+            .order_by(Recommendation.ticker, Recommendation.generated_at.desc())
+        )
+        result = await self.session.execute(stmt)
+        all_recs = result.scalars().all()
+
+        # Keep only the latest for each ticker
+        latest_by_ticker = {}
+        for rec in all_recs:
+            if rec.ticker not in latest_by_ticker:
+                latest_by_ticker[rec.ticker] = rec
+        return latest_by_ticker
+
     async def update_status(self, rec_id: uuid.UUID, status: str) -> None:
         stmt = (
             update(Recommendation)

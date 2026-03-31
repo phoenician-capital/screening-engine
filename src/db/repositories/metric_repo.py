@@ -25,6 +25,25 @@ class MetricRepository(BaseRepository[Metric]):
         result = await self.session.execute(stmt)
         return result.scalar_one_or_none()
 
+    async def get_many_latest(self, tickers: list[str]) -> dict[str, Metric | None]:
+        """Batch fetch latest metrics for multiple tickers."""
+        if not tickers:
+            return {}
+        stmt = (
+            select(Metric)
+            .where(Metric.ticker.in_(tickers))
+            .order_by(Metric.ticker, Metric.period_end.desc())
+        )
+        result = await self.session.execute(stmt)
+        all_metrics = result.scalars().all()
+
+        # Keep only the latest for each ticker
+        latest_by_ticker = {}
+        for m in all_metrics:
+            if m.ticker not in latest_by_ticker:
+                latest_by_ticker[m.ticker] = m
+        return latest_by_ticker
+
     async def get_history(
         self, ticker: str, period_type: str = "annual", limit: int = 5
     ) -> Sequence[Metric]:
