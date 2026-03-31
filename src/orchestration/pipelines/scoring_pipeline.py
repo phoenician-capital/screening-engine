@@ -306,17 +306,6 @@ class ScoringPipeline:
             }
             for r in ranked
         ]
-
-    # ---- OLD IMPLEMENTATION (keeping for reference during transition) ----
-    async def _run_old(
-        self,
-        tickers: list[str] | None = None,
-        run_type: str = "manual",
-        bypass_data_check: bool = False,
-    ) -> list[dict[str, Any]]:
-        """Legacy implementation - replaced by coordinator pattern."""
-        # Load portfolio context once for all comparisons
-        portfolio_avg = await self.portfolio_repo.get_avg_metrics()
         logger.info("Portfolio context: %d holdings loaded", portfolio_avg.get("holding_count", 0))
 
         # Load recent analyst decisions for feedback learning (last 60 days)
