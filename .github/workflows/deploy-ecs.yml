@@ -29,30 +29,30 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t screening-engine:${{ github.sha }} .
-          docker tag screening-engine:${{ github.sha }} screening-engine:latest
+          docker build -t phoenician-capital-screening-engine:${{ github.sha }} .
+          docker tag phoenician-capital-screening-engine:${{ github.sha }} phoenician-capital-screening-engine:latest
 
       - name: Push to ECR
         run: |
-          ECR_URI=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.eu-north-1.amazonaws.com/screening-engine
-          docker tag screening-engine:latest $ECR_URI:latest
-          docker tag screening-engine:latest $ECR_URI:${{ github.sha }}
+          ECR_URI=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.eu-north-1.amazonaws.com/phoenician-capital-screening-engine
+          docker tag phoenician-capital-screening-engine:latest $ECR_URI:latest
+          docker tag phoenician-capital-screening-engine:latest $ECR_URI:${{ github.sha }}
           docker push $ECR_URI:latest
           docker push $ECR_URI:${{ github.sha }}
 
       - name: Update ECS service
         run: |
           aws ecs update-service \
-            --cluster screening-engine-cluster \
-            --service screening-engine-service \
+            --cluster phoenician-capital-prod-cluster \
+            --service phoenician-capital-prod-api-service \
             --force-new-deployment \
             --region eu-north-1
 
       - name: Wait for deployment
         run: |
           for i in {1..60}; do
-            RUNNING=$(aws ecs describe-services --cluster screening-engine-cluster --services screening-engine-service --region eu-north-1 --query 'services[0].runningCount' --output text)
-            DESIRED=$(aws ecs describe-services --cluster screening-engine-cluster --services screening-engine-service --region eu-north-1 --query 'services[0].desiredCount' --output text)
+            RUNNING=$(aws ecs describe-services --cluster phoenician-capital-prod-cluster --services phoenician-capital-prod-api-service --region eu-north-1 --query 'services[0].runningCount' --output text)
+            DESIRED=$(aws ecs describe-services --cluster phoenician-capital-prod-cluster --services phoenician-capital-prod-api-service --region eu-north-1 --query 'services[0].desiredCount' --output text)
             if [ "$RUNNING" -eq "$DESIRED" ]; then
               echo "✅ Deployment complete!"
               exit 0
@@ -65,4 +65,4 @@ jobs:
       - name: Deployment summary
         run: |
           echo "✨ Deployment complete!"
-          aws ecs describe-services --cluster screening-engine-cluster --services screening-engine-service --region eu-north-1 --query 'services[0].[serviceName,desiredCount,runningCount,deployments[0].status]' --output table
+          aws ecs describe-services --cluster phoenician-capital-prod-cluster --services phoenician-capital-prod-api-service --region eu-north-1 --query 'services[0].[serviceName,desiredCount,runningCount,deployments[0].status]' --output table
