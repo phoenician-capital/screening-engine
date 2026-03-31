@@ -50,6 +50,7 @@ services:
       - ./src/db/migrations/006_intelligence_upgrade.sql:/docker-entrypoint-initdb.d/006_intelligence_upgrade.sql
       - ./src/db/migrations/007_learned_patterns.sql:/docker-entrypoint-initdb.d/007_learned_patterns.sql
       - ./src/db/migrations/008_selection_metrics.sql:/docker-entrypoint-initdb.d/008_selection_metrics.sql
+      - ./src/db/migrations/009_phoenician_portfolio.sql:/docker-entrypoint-initdb.d/009_phoenician_portfolio.sql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U phoenician"]
       interval: 5s
