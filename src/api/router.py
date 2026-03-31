@@ -84,16 +84,27 @@ async def get_recommendations(limit: int = Query(100, le=1000)):
             met_repo  = MetricRepository(session)
             port_repo = PortfolioRepository(session)
 
-            portfolio_holdings = await port_repo.get_active()
-            portfolio_tickers  = {h.ticker for h in portfolio_holdings}
+            try:
+                portfolio_holdings = await port_repo.get_active()
+                portfolio_tickers  = {h.ticker for h in portfolio_holdings}
+            except Exception:
+                portfolio_tickers = set()
 
             # Fetch a larger batch to account for portfolio filtering
-            all_recs = await rec_repo.get_top_ranked(limit=min(limit * 2, 1000))
+            try:
+                all_recs = await rec_repo.get_top_ranked(limit=min(limit * 2, 1000))
+            except Exception:
+                all_recs = []
+
             recs = [r for r in all_recs if r.ticker not in portfolio_tickers][:limit]
             rows = []
             for r in recs:
-                co  = await co_repo.get_by_ticker(r.ticker)
-                met = await met_repo.get_latest(r.ticker)
+                try:
+                    co  = await co_repo.get_by_ticker(r.ticker)
+                    met = await met_repo.get_latest(r.ticker)
+                except Exception:
+                    co = None
+                    met = None
 
                 # Parse analyst thesis from scoring_detail
                 sd       = r.scoring_detail or {}
