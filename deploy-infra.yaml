@@ -1,0 +1,123 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Auto-deploy infrastructure for Screening Engine'
+
+Resources:
+  # IAM Role for Lambda to access EC2
+  LambdaEC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EC2SSMAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:SendCommand
+                  - ssm:GetCommandInvocation
+                Resource: '*'
+
+  # Lambda function for deployment
+  DeployFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: screening-engine-deploy
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt LambdaEC2Role.Arn
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+
+          ssm = boto3.client('ssm', region_name='eu-north-1')
+
+          def lambda_handler(event, context):
+              try:
+                  payload = json.loads(event.get('body', '{}'))
+                  if payload.get('ref') != 'refs/heads/main':
+                      return {'statusCode': 200, 'body': 'Skipped'}
+
+                  response = ssm.send_command(
+                      InstanceIds=['i-08bd901b0a0efefad'],
+                      DocumentName='AWS-RunShellScript',
+                      Parameters={
+                          'command': [
+                              'cd ~/screening-engine',
+                              'git pull origin main',
+                              'docker compose restart mcp-server'
+                          ]
+                      }
+                  )
+
+                  return {
+                      'statusCode': 200,
+                      'body': json.dumps({'status': 'Deployed'})
+                  }
+              except Exception as e:
+                  return {'statusCode': 500, 'body': str(e)}
+
+  # API Gateway for webhook
+  DeployWebhookApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: screening-engine-webhook
+      Description: GitHub webhook for auto-deploy
+
+  DeployResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref DeployWebhookApi
+      ParentId: !GetAtt DeployWebhookApi.RootResourceId
+      PathPart: deploy
+
+  DeployMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref DeployWebhookApi
+      ResourceId: !Ref DeployResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${DeployFunction.Arn}/invocations
+
+  LambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DeployFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${DeployWebhookApi}/*
+
+  DeployStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref DeployWebhookApi
+      StageName: prod
+      DeploymentId: !Ref Deployment
+
+  Deployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: DeployMethod
+    Properties:
+      RestApiId: !Ref DeployWebhookApi
+
+Outputs:
+  WebhookUrl:
+    Description: GitHub webhook URL
+    Value: !Sub https://${DeployWebhookApi}.execute-api.${AWS::Region}.amazonaws.com/prod/deploy
+
+  DeployFunctionName:
+    Description: Lambda function name
+    Value: !Ref DeployFunction
