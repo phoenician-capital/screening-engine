@@ -53,7 +53,7 @@ class SelectionLearnedPattern(Base):
     expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     # Auto-decay after 30 days
 
-    metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    pattern_metadata: Mapped[dict] = mapped_column(JSON, default=dict, name="pattern_metadata")
     # Additional context/reasoning
 
     def __repr__(self) -> str:
@@ -99,7 +99,7 @@ class ScoringLearnedPattern(Base):
     expires_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
     # Auto-decay after 30-60 days
 
-    metadata: Mapped[dict] = mapped_column(JSON, default=dict)
+    pattern_metadata: Mapped[dict] = mapped_column(JSON, default=dict, name="pattern_metadata")
 
     def __repr__(self) -> str:
         return (
