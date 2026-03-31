@@ -1,3 +1,13 @@
+# Stage 1: Build frontend
+FROM node:20-alpine AS frontend-builder
+
+WORKDIR /app/frontend
+COPY frontend/package*.json ./
+RUN npm install --frozen-lockfile
+COPY frontend/ .
+RUN npm run build
+
+# Stage 2: Build backend with frontend
 FROM python:3.11-slim
 
 WORKDIR /app
@@ -17,8 +27,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY src/ src/
 COPY .env.example .env
 
-# Copy frontend dist files
-COPY frontend/dist frontend/dist
+# Copy frontend dist files from builder
+COPY --from=frontend-builder /app/frontend/dist ./frontend/dist
 
 # Health check (increased grace period to 30s for app initialization)
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
