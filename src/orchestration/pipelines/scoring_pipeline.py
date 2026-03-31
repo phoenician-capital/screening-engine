@@ -31,36 +31,59 @@ from src.scoring.engine.ranker import Ranker
 from src.scoring.engine.risk_scorer import RiskScorer
 from src.scoring.filters.hard_filters import HardFilterEngine
 from src.shared.types import ScoringResult
+from src.orchestration.pipelines.selection_pipeline import CompanySelectionPipeline
 
 logger = logging.getLogger(__name__)
 
 
 def _build_feedback_context(recent_feedback) -> str:
-    """Build analyst decision history string for the agent's learning."""
+    """Build analyst decision history with verbatim notes for agent learning."""
     if not recent_feedback:
         return "No analyst decisions recorded yet — this is an early run."
 
+    # Separate by action type
     accepted  = [f for f in recent_feedback if f.action == "research_now"]
     watched   = [f for f in recent_feedback if f.action == "watch"]
     rejected  = [f for f in recent_feedback if f.action == "reject"]
 
+    # Get only notes with content (last 12 across all actions for context window)
+    noted = [f for f in recent_feedback if f.notes and f.notes.strip()]
+    noted_sorted = sorted(noted, key=lambda f: f.created_at, reverse=True)[:12]
+
     lines = [f"Recent analyst decisions ({len(recent_feedback)} total, last 60 days):"]
-    lines.append(f"  Research Now: {len(accepted)} | Watch: {len(watched)} | Pass: {len(rejected)}")
+    lines.append(f"  RESEARCH NOW: {len(accepted)} | WATCH: {len(watched)} | PASS: {len(rejected)}")
+    lines.append("")
 
-    if accepted:
-        lines.append(f"  Companies selected for research: {', '.join(f.ticker for f in accepted[:10])}")
+    # Group noted feedback by action
+    noted_by_action = {
+        "research_now": [f for f in noted_sorted if f.action == "research_now"],
+        "watch": [f for f in noted_sorted if f.action == "watch"],
+        "reject": [f for f in noted_sorted if f.action == "reject"],
+    }
 
-    if rejected:
-        # Summarise reject reasons
-        reasons: dict[str, int] = {}
-        for f in rejected:
-            r = f.reject_reason or "unspecified"
-            reasons[r] = reasons.get(r, 0) + 1
-        top_reasons = sorted(reasons.items(), key=lambda x: -x[1])[:5]
-        lines.append("  Top reject reasons: " + "; ".join(f"{r} ({n}x)" for r, n in top_reasons))
-        lines.append(f"  Recently passed: {', '.join(f.ticker for f in rejected[:8])}")
+    if noted_by_action["research_now"]:
+        lines.append("  RESEARCH NOW decisions:")
+        for f in noted_by_action["research_now"][:4]:
+            note_preview = f.notes[:200].strip() if f.notes else ""
+            if note_preview:
+                lines.append(f"    [{f.ticker}] \"{note_preview}{'...' if len(f.notes) > 200 else ''}\"")
 
-    lines.append("Use this to calibrate your scoring — reflect what Phoenician has revealed it values.")
+    if noted_by_action["watch"]:
+        lines.append("  WATCH decisions:")
+        for f in noted_by_action["watch"][:4]:
+            note_preview = f.notes[:200].strip() if f.notes else ""
+            if note_preview:
+                lines.append(f"    [{f.ticker}] \"{note_preview}{'...' if len(f.notes) > 200 else ''}\"")
+
+    if noted_by_action["reject"]:
+        lines.append("  PASS decisions:")
+        for f in noted_by_action["reject"][:4]:
+            note_preview = f.notes[:200].strip() if f.notes else ""
+            if note_preview:
+                lines.append(f"    [{f.ticker}] \"{note_preview}{'...' if len(f.notes) > 200 else ''}\"")
+
+    lines.append("")
+    lines.append("Use these first-person analyst judgments to calibrate your scoring.")
     return "\n".join(lines)
 
 
@@ -171,6 +194,27 @@ class ScoringPipeline:
 
         async def _score_one(company) -> None:
             async with sem:
+                # 1.5. SELECTION TEAM PRE-FILTER (NEW)
+                try:
+                    selection_pipeline = CompanySelectionPipeline(self.session)
+                    selection_result = await selection_pipeline.evaluate_company(company, None)
+
+                    if not selection_result.passed_selection:
+                        # Company rejected by selection team, skip scoring
+                        results.append(ScoringResult(
+                            ticker=company.ticker,
+                            fit_score=0,
+                            risk_score=100,
+                            rank_score=-100,
+                            disqualified=True,
+                            disqualify_reason=f"Selection filter: {selection_result.disqualification_reason}",
+                        ))
+                        logger.debug(f"✗ {company.ticker}: {selection_result.disqualification_reason}")
+                        return
+                except Exception as e:
+                    logger.warning(f"Selection pipeline error for {company.ticker}: {e}, continuing with normal scoring")
+                    pass  # Continue with normal scoring if selection fails
+
                 # 3. Get latest metrics
                 metrics = await self.metric_repo.get_latest(company.ticker)
                 if not metrics:

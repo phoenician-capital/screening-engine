@@ -18,8 +18,8 @@ async function post(path, body) {
 
 export const api = {
   recommendations: (limit = 500) => get(`/recommendations?limit=${limit}`),
-  feedback: (ticker, action, reason = null) =>
-    post(`/recommendations/${ticker}/feedback`, { action, reason }),
+  feedback: (ticker, action, reason = null, notes = null) =>
+    post(`/recommendations/${ticker}/feedback`, { action, reason, notes }),
 
   startScreening: (max_companies = 20) =>
     post('/screening/run', { max_companies }),

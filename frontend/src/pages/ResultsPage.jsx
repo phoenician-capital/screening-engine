@@ -234,18 +234,22 @@ function TableRow({ row, rank, selected, onClick }) {
 
 // ── Detail Drawer ─────────────────────────────────────────────────────────────
 function DetailDrawer({ row, onClose, onFeedback }) {
-  const [tab, setTab]           = useState('memo')
-  const [feedbackOpen, setFeedbackOpen] = useState(false)
-  const [rejectReason, setRejectReason] = useState('')
-  const [submitting, setSubmitting]     = useState(false)
+  const [tab, setTab]               = useState('memo')
+  const [feedbackAction, setFeedbackAction] = useState(null)  // null = closed, 'research_now'/'watch'/'reject' = open
+  const [rejectReason, setRejectReason]     = useState('')
+  const [analystNotes, setAnalystNotes]     = useState('')
+  const [submitting, setSubmitting]         = useState(false)
 
   const TABS = ['memo', 'scoring', 'diligence', 'actions']
 
   const handleFeedback = async (action, reason = null) => {
     setSubmitting(true)
     try {
-      await api.feedback(row.ticker, action, reason)
+      await api.feedback(row.ticker, action, reason, analystNotes.trim() || null)
       onFeedback(row.ticker, action)
+      setFeedbackAction(null)
+      setAnalystNotes('')
+      setRejectReason('')
     } finally {
       setSubmitting(false)
     }
@@ -414,52 +418,88 @@ function DetailDrawer({ row, onClose, onFeedback }) {
               <ActionBtn
                 label="Research Now"
                 color="emerald"
-                active={row.verdict === 'RESEARCH NOW'}
+                active={feedbackAction === 'research_now'}
                 disabled={submitting}
-                onClick={() => handleFeedback('research_now')}
+                onClick={() => setFeedbackAction(a => a === 'research_now' ? null : 'research_now')}
               />
               <ActionBtn
                 label="Watch"
                 color="amber"
+                active={feedbackAction === 'watch'}
                 disabled={submitting}
-                onClick={() => handleFeedback('watch')}
+                onClick={() => setFeedbackAction(a => a === 'watch' ? null : 'watch')}
               />
               <ActionBtn
                 label="Pass"
                 color="stone"
+                active={feedbackAction === 'reject'}
                 disabled={submitting}
-                onClick={() => setFeedbackOpen(f => !f)}
+                onClick={() => setFeedbackAction(a => a === 'reject' ? null : 'reject')}
               />
             </div>
 
-            {feedbackOpen && (
+            {feedbackAction && (
               <motion.div
                 initial={{ opacity: 0, y: 6 }}
                 animate={{ opacity: 1, y: 0 }}
                 className="p-4 bg-stone-50 border border-stone-200 rounded-xs space-y-3"
               >
-                <div className="section-label">Pass Reason</div>
-                <select
-                  value={rejectReason}
-                  onChange={e => setRejectReason(e.target.value)}
+                {/* Pass reason dropdown — only for reject */}
+                {feedbackAction === 'reject' && (
+                  <>
+                    <div className="section-label">Pass Reason</div>
+                    <select
+                      value={rejectReason}
+                      onChange={e => setRejectReason(e.target.value)}
+                      className="w-full py-2 px-3 text-sm bg-white border border-stone-200 rounded-xs
+                                 focus:outline-none focus:border-gold-400"
+                    >
+                      <option value="">Select reason…</option>
+                      {[
+                        'Too expensive', 'Weak moat / low quality', 'Poor unit economics',
+                        'No insider alignment', 'Too well-covered', 'Limited growth runway',
+                        'Too risky', 'Already known',
+                        ...(row.diligence?.slice(0, 3).map(q => `Unresolved: ${q.slice(0, 60)}`) ?? []),
+                      ].map(r => <option key={r} value={r}>{r}</option>)}
+                    </select>
+                  </>
+                )}
+
+                {/* Free-text textarea — all actions */}
+                <div className="section-label">
+                  Analyst Notes
+                  <span className="ml-1 font-normal text-stone-400 normal-case">
+                    (optional — fed back to AI scorer on next run)
+                  </span>
+                </div>
+                <textarea
+                  value={analystNotes}
+                  onChange={e => setAnalystNotes(e.target.value)}
+                  placeholder={
+                    feedbackAction === 'research_now'
+                      ? 'e.g. "Strong moat, 22% ROIC, founder owns 18%. Watch the customer concentration."'
+                      : feedbackAction === 'watch'
+                      ? 'e.g. "Interesting model but leverage at 3.8x ND/EBITDA is too high right now."'
+                      : 'e.g. "Pass — customer concentration 42% top customer is a structural red flag."'
+                  }
+                  rows={3}
                   className="w-full py-2 px-3 text-sm bg-white border border-stone-200 rounded-xs
-                             focus:outline-none focus:border-gold-400"
-                >
-                  <option value="">Select reason…</option>
-                  {[
-                    'Too expensive', 'Weak moat / low quality', 'Poor unit economics',
-                    'No insider alignment', 'Too well-covered', 'Limited growth runway',
-                    'Too risky', 'Already known',
-                    ...(row.diligence?.slice(0, 3).map(q => `Unresolved: ${q.slice(0, 60)}`) ?? []),
-                  ].map(r => <option key={r} value={r}>{r}</option>)}
-                </select>
+                             focus:outline-none focus:border-gold-400 resize-none
+                             placeholder:text-stone-300 leading-relaxed"
+                />
+
                 <button
-                  disabled={submitting || !rejectReason}
-                  onClick={() => handleFeedback('reject', rejectReason)}
-                  className="w-full py-2 text-sm font-medium bg-stone-800 text-white rounded-xs
-                             hover:bg-stone-900 disabled:opacity-40 transition"
-                >
-                  Confirm Pass
+                  disabled={submitting || (feedbackAction === 'reject' && !rejectReason)}
+                  onClick={() => handleFeedback(feedbackAction,
+                    feedbackAction === 'reject' ? rejectReason : null)}
+                  className={clsx('w-full py-2 text-sm font-medium rounded-xs transition disabled:opacity-40',
+                    feedbackAction === 'research_now' && 'bg-emerald-600 hover:bg-emerald-700 text-white',
+                    feedbackAction === 'watch'        && 'bg-amber-500  hover:bg-amber-600  text-white',
+                    feedbackAction === 'reject'       && 'bg-stone-800  hover:bg-stone-900  text-white',
+                  )}>
+                  {submitting ? 'Saving…' : `Confirm ${
+                    feedbackAction === 'research_now' ? 'Research Now'
+                    : feedbackAction === 'watch' ? 'Watch' : 'Pass'}`}
                 </button>
               </motion.div>
             )}
