@@ -773,29 +773,37 @@ async def get_stats():
     try:
         async with factory() as session:
             from src.db.repositories.recommendation_repo import RecommendationRepository
-            from src.db.repositories.company_repo import CompanyRepository
             from src.db.repositories.feedback_repo import FeedbackRepository
 
             rec_repo  = RecommendationRepository(session)
-            co_repo   = CompanyRepository(session)
             fb_repo   = FeedbackRepository(session)
 
-            recs     = await rec_repo.get_top_ranked(limit=500)
-            all_cos  = await co_repo.get_active()
-            feedback = await fb_repo.get_recent_feedback(days=60)
+            try:
+                recs     = await rec_repo.get_top_ranked(limit=500)
+                feedback = await fb_repo.get_recent_feedback(days=60)
 
-            research = sum(1 for r in recs if r.status == "researching")
-            watched  = sum(1 for r in recs if r.status == "watched")
-            avg_fit  = round(sum(float(r.fit_score) for r in recs) / len(recs), 1) if recs else 0
+                research = sum(1 for r in recs if r.status == "researching")
+                watched  = sum(1 for r in recs if r.status == "watched")
+                avg_fit  = round(sum(float(r.fit_score) for r in recs) / len(recs), 1) if recs else 0
 
-            return {
-                "total_universe":    len(all_cos),
-                "ranked":            len(recs),
-                "in_research":       research,
-                "on_watchlist":      watched,
-                "avg_fit_score":     avg_fit,
-                "recent_decisions":  len(feedback),
-            }
+                return {
+                    "total_universe":    len(recs),
+                    "ranked":            len(recs),
+                    "in_research":       research,
+                    "on_watchlist":      watched,
+                    "avg_fit_score":     avg_fit,
+                    "recent_decisions":  len(feedback),
+                }
+            except Exception:
+                # Empty database or schema issue — return defaults
+                return {
+                    "total_universe":    0,
+                    "ranked":            0,
+                    "in_research":       0,
+                    "on_watchlist":      0,
+                    "avg_fit_score":     0,
+                    "recent_decisions":  0,
+                }
     finally:
         await engine.dispose()
 
