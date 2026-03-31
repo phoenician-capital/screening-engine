@@ -8,14 +8,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - name: Deploy to EC2
-        uses: appleboy/ssh-action@master
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_PRIVATE_KEY }}
-          script: |
-            cd ~/screening-engine
-            git pull origin main
-            docker compose restart mcp-server
-            echo "✅ Deploy complete"
+      - name: Trigger Lambda Deployment
+        run: |
+          curl -X POST https://jcx8vpljvk.execute-api.eu-north-1.amazonaws.com/prod/deploy \
+            -H "Content-Type: application/json" \
+            -d '{"ref":"refs/heads/main"}'
+          echo "✅ Deploy triggered via AWS Lambda"
