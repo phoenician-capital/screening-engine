@@ -382,19 +382,37 @@ class ScoringPipeline:
 
         await asyncio.gather(*[_score_one(c) for c in companies], return_exceptions=True)
 
-        # Flush new recs to DB first
-        await self.session.flush()
+        # Flush new recs to DB — with retry logic if transaction is aborted
+        max_flush_retries = 2
+        for attempt in range(max_flush_retries):
+            try:
+                await self.session.flush()
+                break
+            except Exception as e:
+                if attempt == 0:
+                    logger.warning(f"Flush attempt 1 failed: {e}, retrying with rollback")
+                    try:
+                        await self.session.rollback()
+                    except Exception:
+                        pass
+                else:
+                    logger.error(f"Flush failed after {max_flush_retries} attempts, continuing with query")
+                    raise
 
         # Re-rank ALL recommendations across all runs by rank_score descending
         # Deduplicate by ticker — keep only the highest rank_score per ticker
         from sqlalchemy import update as _update, select as _select
 
-        all_recs = (await self.session.execute(
-            _select(Recommendation)
-            .where(Recommendation.rank_score.isnot(None))
-            .where(Recommendation.rank_score > -50)
-            .order_by(Recommendation.rank_score.desc())
-        )).scalars().all()
+        try:
+            all_recs = (await self.session.execute(
+                _select(Recommendation)
+                .where(Recommendation.rank_score.isnot(None))
+                .where(Recommendation.rank_score > -50)
+                .order_by(Recommendation.rank_score.desc())
+            )).scalars().all()
+        except Exception as e:
+            logger.warning(f"Query error: {e}")
+            all_recs = []
 
         # Deduplicate: keep only best score per ticker
         seen_tickers: dict[str, Recommendation] = {}

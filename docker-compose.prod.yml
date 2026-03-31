@@ -1,0 +1,92 @@
+version: '3.8'
+
+services:
+  mcp-server:
+    image: 578736536410.dkr.ecr.eu-north-1.amazonaws.com/screening-engine:latest
+    command: uvicorn src.mcp_server.main:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 60
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: phoenician
+      DB_USER: phoenician
+      DB_PASSWORD: ${DB_PASSWORD:-change_me_in_production}
+      REDIS_HOST: redis
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/screening/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: phoenician
+      POSTGRES_USER: phoenician
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-change_me_in_production}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./src/db/migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial_schema.sql
+      - ./src/db/migrations/002_insider_price_alerts.sql:/docker-entrypoint-initdb.d/002_insider_price_alerts.sql
+      - ./src/db/migrations/003_widen_sector_columns.sql:/docker-entrypoint-initdb.d/003_widen_sector_columns.sql
+      - ./src/db/migrations/004_production_hardening.sql:/docker-entrypoint-initdb.d/004_production_hardening.sql
+      - ./src/db/migrations/005_portfolio_holdings.sql:/docker-entrypoint-initdb.d/005_portfolio_holdings.sql
+      - ./src/db/migrations/006_intelligence_upgrade.sql:/docker-entrypoint-initdb.d/006_intelligence_upgrade.sql
+      - ./src/db/migrations/007_learned_patterns.sql:/docker-entrypoint-initdb.d/007_learned_patterns.sql
+      - ./src/db/migrations/008_selection_metrics.sql:/docker-entrypoint-initdb.d/008_selection_metrics.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U phoenician"]
+      interval: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  frontend:
+    image: 578736536410.dkr.ecr.eu-north-1.amazonaws.com/screening-engine-frontend:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - mcp-server
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  pgdata:

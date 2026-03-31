@@ -97,14 +97,30 @@ async def get_recommendations(limit: int = Query(100, le=1000)):
                 all_recs = []
 
             recs = [r for r in all_recs if r.ticker not in portfolio_tickers][:limit]
+
+            # Batch fetch companies and metrics for all recs at once (not one-by-one)
+            tickers = [r.ticker for r in recs]
+            try:
+                companies = await co_repo.get_many_by_tickers(tickers) if hasattr(co_repo, 'get_many_by_tickers') else {}
+                metrics = await met_repo.get_many_latest(tickers) if hasattr(met_repo, 'get_many_latest') else {}
+            except Exception:
+                companies, metrics = {}, {}
+
             rows = []
             for r in recs:
-                try:
-                    co  = await co_repo.get_by_ticker(r.ticker)
-                    met = await met_repo.get_latest(r.ticker)
-                except Exception:
-                    co = None
-                    met = None
+                co  = companies.get(r.ticker) if isinstance(companies, dict) else None
+                met = metrics.get(r.ticker) if isinstance(metrics, dict) else None
+
+                if not co:
+                    try:
+                        co = await co_repo.get_by_ticker(r.ticker)
+                    except Exception:
+                        co = None
+                if not met:
+                    try:
+                        met = await met_repo.get_latest(r.ticker)
+                    except Exception:
+                        met = None
 
                 # Parse analyst thesis from scoring_detail
                 sd       = r.scoring_detail or {}
@@ -264,41 +280,6 @@ async def submit_feedback(ticker: str, body: FeedbackBody):
 # SCREENING RUN
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _run_sync(coro):
-    """Run a coroutine in an isolated thread+event-loop."""
-    import concurrent.futures
-    result_holder = [None]
-    error_holder  = [None]
-    done = threading.Event()
-
-    def _target():
-        import concurrent.futures as cf
-        executor = cf.ThreadPoolExecutor(max_workers=16, thread_name_prefix="api_screening")
-        loop = asyncio.new_event_loop()
-        loop.set_default_executor(executor)
-        asyncio.set_event_loop(loop)
-        try:
-            result_holder[0] = loop.run_until_complete(coro)
-        except Exception as e:
-            error_holder[0] = e
-        finally:
-            try:
-                pending = asyncio.all_tasks(loop)
-                for t in pending: t.cancel()
-                if pending:
-                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
-                loop.close()
-            finally:
-                executor.shutdown(wait=True, cancel_futures=True)
-            done.set()
-
-    threading.Thread(target=_target, daemon=True).start()
-    done.wait()
-    if error_holder[0]:
-        raise error_holder[0]
-    return result_holder[0]
-
-
 class RunScreeningBody(BaseModel):
     max_companies: int = 20
 
@@ -360,25 +341,30 @@ async def start_screening(body: RunScreeningBody):
             "t0": time.time(), "elapsed": 0,
         })
 
-    def _bg():
+    async def _bg_async():
         try:
             t0 = _SCREENING_JOB["t0"]
             _SCREENING_JOB.update({"step": 1, "step_label": "Discovering companies"})
             _emit_event("screening_started", step=1, step_label="Discovering companies", timestamp=time.time())
 
-            async def _discover():
-                from src.orchestration.discovery.universe_expander import UniverseExpander
-                from sqlalchemy.pool import NullPool
-                eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
-                fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
-                try:
-                    async with fac() as sess:
+            # Discover companies
+            from src.orchestration.discovery.universe_expander import UniverseExpander
+            from sqlalchemy.pool import NullPool
+            from sqlalchemy import text
+            eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
+            fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+            try:
+                async with fac() as sess:
+                    try:
                         exp = UniverseExpander(sess)
-                        return await exp.expand_via_screener(max_companies=body.max_companies)
-                finally:
-                    await eng.dispose()
+                        tickers = await exp.expand_via_screener(max_companies=body.max_companies)
+                    except Exception as e:
+                        logger.warning(f"Discovery failed ({e}), falling back to portfolio companies")
+                        result = await sess.execute(text("SELECT ticker FROM portfolio_holdings WHERE is_active = true LIMIT :limit"), {"limit": body.max_companies})
+                        tickers = [row[0] for row in result.fetchall()]
+            finally:
+                await eng.dispose()
 
-            tickers = _run_sync(_discover())
             _SCREENING_JOB.update({
                 "tickers_found": len(tickers),
                 "d1": f"{len(tickers)} candidates · {time.time()-t0:.0f}s",
@@ -386,19 +372,18 @@ async def start_screening(body: RunScreeningBody):
             })
             _emit_event("discovery_complete", tickers_found=len(tickers), elapsed=time.time()-t0)
 
-            async def _score():
-                from src.orchestration.pipelines.scoring_pipeline import ScoringPipeline
-                eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
-                fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
-                try:
-                    async with fac() as sess:
-                        pipe = ScoringPipeline(sess)
-                        return await pipe.run(tickers=tickers or None, run_type="manual")
-                finally:
-                    await eng.dispose()
+            # Score companies
+            from src.orchestration.pipelines.scoring_pipeline import ScoringPipeline
+            eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
+            fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+            try:
+                async with fac() as sess:
+                    pipe = ScoringPipeline(sess)
+                    t2 = time.time()
+                    scored = await pipe.run(tickers=tickers or None, run_type="manual")
+            finally:
+                await eng.dispose()
 
-            t2 = time.time()
-            scored = _run_sync(_score())
             _SCREENING_JOB.update({
                 "scored": len(scored) if isinstance(scored, list) else 0,
                 "d2": f"{_SCREENING_JOB['scored']} companies · {time.time()-t2:.1f}s",
@@ -412,8 +397,18 @@ async def start_screening(body: RunScreeningBody):
             })
             _emit_event("screening_done", done=True, elapsed=round(time.time()-t0))
         except Exception as e:
+            logger.exception(f"Background screening error: {e}")
             _SCREENING_JOB.update({"error": str(e), "done": True, "running": False})
             _emit_event("screening_error", error=str(e))
+
+    def _bg():
+        """Wrapper to run async code in background thread."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(_bg_async())
+        finally:
+            loop.close()
 
     threading.Thread(target=_bg, daemon=False, name="api_screening_bg").start()
     return {"ok": True, "message": "Screening started"}
@@ -434,66 +429,61 @@ async def start_portfolio_scan():
             "t0": time.time(), "elapsed": 0,
         })
 
-    def _bg():
+    async def _bg_async():
         try:
             t0 = _SCREENING_JOB["t0"]
 
-            async def _get_tickers():
-                eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
-                fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
-                try:
-                    async with fac() as sess:
-                        from src.db.repositories.portfolio_repo import PortfolioRepository
-                        repo = PortfolioRepository(sess)
-                        holdings = await repo.get_active()
-                        return [h.ticker for h in holdings]
-                finally:
-                    await eng.dispose()
+            # Get portfolio tickers
+            eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
+            fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+            try:
+                async with fac() as sess:
+                    from src.db.repositories.portfolio_repo import PortfolioRepository
+                    repo = PortfolioRepository(sess)
+                    holdings = await repo.get_active()
+                    tickers = [h.ticker for h in holdings]
+            finally:
+                await eng.dispose()
 
-            tickers = _run_sync(_get_tickers())
+            # Ingest missing metrics
+            eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
+            fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+            try:
+                async with fac() as sess:
+                    from src.db.repositories import MetricRepository
+                    from src.orchestration.discovery.universe_expander import UniverseExpander
+                    metric_repo = MetricRepository(sess)
+                    expander = UniverseExpander(sess)
+                    missing = []
+                    for t in tickers:
+                        m = await metric_repo.get_latest(t)
+                        if not m:
+                            missing.append(t)
+                    if missing:
+                        _SCREENING_JOB["d1"] = f"Ingesting {len(missing)} new holdings…"
+                        await expander.ingest_new_tickers(missing)
+                    n_ingested = len(missing)
+            finally:
+                await eng.dispose()
 
-            # Ingest any portfolio tickers that have no metrics yet
-            async def _ingest_missing():
-                eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
-                fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
-                try:
-                    async with fac() as sess:
-                        from src.db.repositories import MetricRepository
-                        from src.orchestration.discovery.universe_expander import UniverseExpander
-                        metric_repo = MetricRepository(sess)
-                        expander = UniverseExpander(sess)
-                        missing = []
-                        for t in tickers:
-                            m = await metric_repo.get_latest(t)
-                            if not m:
-                                missing.append(t)
-                        if missing:
-                            _SCREENING_JOB["d1"] = f"Ingesting {len(missing)} new holdings…"
-                            await expander.ingest_new_tickers(missing)
-                        return len(missing)
-                finally:
-                    await eng.dispose()
-
-            n_ingested = _run_sync(_ingest_missing())
             _SCREENING_JOB.update({
                 "tickers_found": len(tickers),
                 "d1": f"{len(tickers)} holdings · {n_ingested} ingested",
                 "step": 2, "step_label": "Scoring with AI Analyst Agent",
             })
 
-            async def _score():
-                from src.orchestration.pipelines.scoring_pipeline import ScoringPipeline
-                eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
-                fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
-                try:
-                    async with fac() as sess:
-                        pipe = ScoringPipeline(sess)
-                        return await pipe.run(tickers=tickers, run_type="portfolio_scan", bypass_data_check=True)
-                finally:
-                    await eng.dispose()
+            # Score
+            from src.orchestration.pipelines.scoring_pipeline import ScoringPipeline
+            eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
+            fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+            try:
+                async with fac() as sess:
+                    pipe = ScoringPipeline(sess)
+                    t2 = time.time()
+                    scored = await pipe.run(tickers=tickers, run_type="portfolio_scan", bypass_data_check=True)
+            finally:
+                await eng.dispose()
 
-            t2 = time.time()
-            scored = _run_sync(_score())
             _SCREENING_JOB.update({
                 "scored": len(scored) if isinstance(scored, list) else 0,
                 "d2": f"{_SCREENING_JOB['scored']} holdings scored · {time.time()-t2:.1f}s",
@@ -502,7 +492,17 @@ async def start_portfolio_scan():
                 "elapsed": round(time.time() - t0),
             })
         except Exception as e:
+            logger.exception(f"Background portfolio scan error: {e}")
             _SCREENING_JOB.update({"error": str(e), "done": True, "running": False})
+
+    def _bg():
+        """Wrapper to run async code in background thread."""
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(_bg_async())
+        finally:
+            loop.close()
 
     threading.Thread(target=_bg, daemon=False, name="api_portfolio_scan_bg").start()
     return {"ok": True, "message": "Portfolio scan started"}

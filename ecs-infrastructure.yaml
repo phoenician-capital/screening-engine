@@ -64,12 +64,12 @@ Resources:
       TaskDefinition: !Ref ScreeningEngineTaskDefinition
       DesiredCount: 1
       LaunchType: EC2
+      PlacementStrategies:
+        - Type: spread
+          Field: instanceId
       DeploymentConfiguration:
         MaximumPercent: 200
         MinimumHealthyPercent: 100
-        DeploymentCircuitBreaker:
-          Enable: true
-          Rollback: true
 
   # CloudWatch Log Group
   ECSLogGroup:

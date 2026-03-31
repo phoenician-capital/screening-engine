@@ -25,7 +25,7 @@ if ! aws ecr describe-repositories --repository-names $ECR_REPO --region $AWS_RE
         --repository-name $ECR_REPO \
         --region $AWS_REGION \
         --image-scanning-configuration scanOnPush=true \
-        --encryption-configuration encryptionType=AES \
+        --encryption-configuration encryptionType=AES256 \
         || true
 fi
 
