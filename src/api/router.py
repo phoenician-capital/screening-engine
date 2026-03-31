@@ -844,3 +844,21 @@ async def reset_screening_db():
         return {"ok": True, "message": "Screening data wiped — ready for fresh run"}
     except Exception as e:
         return {"ok": False, "message": str(e)}
+
+
+@router.post("/admin/reload")
+async def reload_api():
+    """Reload API — triggers module reload for development."""
+    import subprocess
+    import os
+    try:
+        # Force git pull + restart in background
+        subprocess.Popen(
+            ["bash", "-c", "cd ~/screening-engine && git pull origin main && docker compose restart mcp-server"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+        return {"ok": True, "message": "Reload triggered — API will restart in 10 seconds"}
+    except Exception as e:
+        return {"ok": False, "message": str(e)}
