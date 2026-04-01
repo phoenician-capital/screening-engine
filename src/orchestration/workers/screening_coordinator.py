@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import Counter
 from typing import Callable, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
@@ -34,7 +35,7 @@ class ScreeningCoordinator:
     def __init__(self):
         """Initialize coordinator."""
         self.scorer = SingleCompanyScorer()
-        self.max_concurrent = 50  # Async semaphore limit
+        self.max_concurrent = 3  # Async semaphore limit — keep low to avoid LLM rate limits
         self.batch_size = 20  # Commit batch size
 
     async def run_screening(
@@ -73,7 +74,28 @@ class ScreeningCoordinator:
 
             logger.info(f"Starting screening of {len(companies)} companies")
 
-            # 2. Score all companies concurrently with semaphore
+            # 2. Selection pre-filter — eliminates low-quality companies before expensive LLM scoring
+            on_progress(
+                ScreeningProgress(
+                    step="selection",
+                    status="starting",
+                    total_companies=len(companies),
+                    elapsed_seconds=time.time() - t0,
+                )
+            )
+
+            companies = await self._pre_filter_companies(companies, t0)
+
+            on_progress(
+                ScreeningProgress(
+                    step="selection",
+                    status="complete",
+                    total_companies=len(companies),
+                    elapsed_seconds=time.time() - t0,
+                )
+            )
+
+            # 3. Score surviving companies concurrently with semaphore
             on_progress(
                 ScreeningProgress(
                     step="scoring",
@@ -125,46 +147,8 @@ class ScreeningCoordinator:
             logger.info(
                 f"Scoring complete: {len(results)} succeeded, {len(failed_companies)} failed"
             )
-
-            # 3. Retry failed companies (once) with fresh attempt
             if failed_companies:
-                logger.info(f"Retrying {len(failed_companies)} failed companies...")
-
-                on_progress(
-                    ScreeningProgress(
-                        step="retry",
-                        status="starting",
-                        total_companies=len(failed_companies),
-                        companies_scored=len(results),
-                        failed_companies=len(failed_companies),
-                        elapsed_seconds=time.time() - t0,
-                    )
-                )
-
-                retry_results = []
-                for company in failed_companies:
-                    async with sem:
-                        try:
-                            result = await self.scorer.score(
-                                company, scoring_run_id, shared_context
-                            )
-                            if result:
-                                results.append(result)
-                                retry_results.append(company.ticker)
-                                on_progress(
-                                    ScreeningProgress(
-                                        step="retry",
-                                        status="in_progress",
-                                        total_companies=len(failed_companies),
-                                        companies_scored=len(retry_results),
-                                        current_ticker=company.ticker,
-                                        elapsed_seconds=time.time() - t0,
-                                    )
-                                )
-                        except Exception as e:
-                            logger.debug(f"Retry failed for {company.ticker}: {e}")
-
-                logger.info(f"Retry complete: {len(retry_results)} recovered")
+                logger.info(f"Skipped {len(failed_companies)} companies (no metrics or hard-filter rejected)")
 
             # 4. Rank all successfully scored companies
             on_progress(
@@ -206,6 +190,74 @@ class ScreeningCoordinator:
                 )
             )
             raise
+
+    async def _pre_filter_companies(
+        self,
+        companies: list[Company],
+        t0: float,
+    ) -> list[Company]:
+        """
+        Run the 5-agent SelectionPipeline on all companies and return only those
+        that pass. This eliminates low-quality candidates before the expensive
+        per-company LLM scoring step.
+        """
+        engine = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
+        factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+        try:
+            async with factory() as session:
+                metric_repo = MetricRepository(session)
+
+                # Load all metrics concurrently (one DB hit per company, in parallel)
+                async def _load_metric(company: Company):
+                    try:
+                        return company.ticker, await metric_repo.get_latest(company.ticker)
+                    except Exception:
+                        return company.ticker, None
+
+                metric_results = await asyncio.gather(
+                    *[_load_metric(c) for c in companies]
+                )
+                metrics_map = {
+                    ticker: metric
+                    for ticker, metric in metric_results
+                    if metric is not None
+                }
+
+                # Run all companies through the 5-agent selection pipeline
+                selection_pipeline = CompanySelectionPipeline(session)
+                results = await selection_pipeline.select_candidates(companies, metrics_map)
+
+                passed_tickers = {r.ticker for r in results if r.passed_selection}
+                filtered = [c for c in companies if c.ticker in passed_tickers]
+
+                rejected_count = len(companies) - len(filtered)
+                logger.info(
+                    f"Selection pre-filter: {len(filtered)}/{len(companies)} passed "
+                    f"({rejected_count} rejected before LLM scoring) "
+                    f"in {time.time() - t0:.1f}s"
+                )
+
+                # Log the most common rejection reasons to make the filter transparent
+                rejections = [r for r in results if not r.passed_selection and r.disqualification_reason]
+                if rejections:
+                    first_reasons = [r.disqualification_reason.split(" | ")[0] for r in rejections]
+                    for reason, count in Counter(first_reasons).most_common(5):
+                        logger.info(f"  Rejected {count}x: {reason}")
+
+                return filtered
+
+        except Exception as e:
+            # If pre-filter fails for any reason, log and fall back to full list
+            # so a bug here doesn't silently kill the entire screening run
+            logger.error(
+                f"Selection pre-filter failed ({type(e).__name__}: {e}) — "
+                f"falling back to unfiltered list"
+            )
+            return companies
+
+        finally:
+            await engine.dispose()
 
     async def _prepare_shared_context(self) -> dict:
         """Prepare context shared across all company scoring."""

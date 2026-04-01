@@ -45,22 +45,24 @@ class FilterAgent(BaseAgent):
         """Check if company passes hard metrics gates."""
 
         failures = []
+        missing = []
 
-        # Gross Margin check
-        if metrics.gross_margin is not None:
-            if metrics.gross_margin < self.min_gross_margin:
-                failures.append(
-                    f"Gross margin {metrics.gross_margin:.1%} < {self.min_gross_margin:.0%}"
-                )
+        # Gross Margin — most reliable metric; reject if absent (all DB-sourced companies should have it)
+        if metrics.gross_margin is None:
+            missing.append("gross_margin")
+        elif metrics.gross_margin < self.min_gross_margin:
+            failures.append(
+                f"Gross margin {metrics.gross_margin:.1%} < {self.min_gross_margin:.0%}"
+            )
 
-        # ROIC check
+        # ROIC — flag as missing but don't hard-reject (not all sources provide it)
         if metrics.roic is not None:
             if metrics.roic < self.min_roic:
                 failures.append(
                     f"ROIC {metrics.roic:.1%} < {self.min_roic:.0%}"
                 )
 
-        # Revenue growth check
+        # Revenue growth — flag as missing but don't hard-reject (calculated field, may lag)
         if metrics.revenue_growth_3yr is not None:
             if metrics.revenue_growth_3yr < self.min_growth:
                 failures.append(
@@ -74,8 +76,19 @@ class FilterAgent(BaseAgent):
                     f"Leverage {metrics.net_debt_ebitda:.1f}x > {self.max_leverage:.0f}x"
                 )
 
+        # Profitability gate — reject loss-makers unless net_income data is simply absent
+        if metrics.net_income is not None and metrics.net_income < 0:
+            failures.append(f"Unprofitable: net income negative")
+
+        # Require at least gross_margin to be present — no margin data = can't assess business quality
+        if missing:
+            failures.append(f"Missing required metrics: {', '.join(missing)}")
+
         passed = len(failures) == 0
-        reason = " | ".join(failures) if failures else "Passed all hard gates"
+        reason = " | ".join(failures) if failures else (
+            f"Passed all hard gates"
+            + (f" (missing: {', '.join(missing)})" if missing else "")
+        )
 
         return AgentDecision(
             passed=passed,

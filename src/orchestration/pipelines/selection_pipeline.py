@@ -9,15 +9,14 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select as _select, func as _func
 from sqlalchemy.ext.asyncio import AsyncSession
-
-from datetime import datetime, timedelta
 
 from src.db.models.company import Company
 from src.db.models.metric import Metric
 from src.db.models.learned_patterns import SelectionAgentDecision
 from src.db.models.insider_purchase import InsiderPurchase
+from src.db.repositories import MetricRepository
 from src.scoring.agents.selection.filter_agent import FilterAgent, FilterMetrics
 from src.scoring.agents.selection.business_model_agent import BusinessModelAgent
 from src.scoring.agents.selection.founder_agent import FounderAgent
@@ -41,6 +40,7 @@ class CompanySelectionPipeline:
 
     def __init__(self, session: AsyncSession):
         self.session = session
+        self.metric_repo = MetricRepository(session)
         self.filter_agent = FilterAgent()
         self.business_model_agent = BusinessModelAgent()
         self.founder_agent = FounderAgent()
@@ -232,22 +232,21 @@ class CompanySelectionPipeline:
         Returns (should_filter_out, reason).
         """
         try:
-            # Get active learned patterns that should trigger auto-rejection
-            stmt = select(SelectionLearnedPattern).where(
-                SelectionLearnedPattern.agent_type.in_(
-                    ["filter", "red_flag"]
-                ),
+            from src.db.models.learned_patterns import SelectionLearnedPattern
+
+            stmt = _select(SelectionLearnedPattern).where(
+                SelectionLearnedPattern.agent_type.in_(["filter", "red_flag"]),
                 SelectionLearnedPattern.expires_at > datetime.utcnow(),
-                SelectionLearnedPattern.confidence > 0.75,  # High confidence only
+                SelectionLearnedPattern.confidence > 0.75,
             )
             result = await self.session.execute(stmt)
             patterns = result.scalars().all()
 
             for pattern in patterns:
-                # Check if metric matches pattern's new threshold
                 if (
                     pattern.metric_name == "buyback_to_fcf_ratio"
                     and metric
+                    and hasattr(metric, "buyback_to_fcf_ratio")
                     and metric.buyback_to_fcf_ratio
                 ):
                     threshold = pattern.new_threshold.get("threshold", 1.0)
@@ -264,32 +263,31 @@ class CompanySelectionPipeline:
             return False, None
 
     async def _load_company_metrics(self, ticker: str) -> Metric | None:
-        """Load latest metrics for company."""
-        return await self.metric_repo.get_latest(ticker)
+        """Load latest metrics for company from the shared session."""
+        try:
+            return await self.metric_repo.get_latest(ticker)
+        except Exception as e:
+            logger.debug(f"Failed to load metrics for {ticker}: {e}")
+            return None
 
     async def _load_alignment_data(self, ticker: str) -> tuple[float | None, float | None, int]:
         """Load founder and insider ownership data."""
-        from sqlalchemy import select, func
-        from datetime import datetime, timedelta
-        from src.db.models.insider_purchase import InsiderPurchase
-
         founder_ownership = None
         insider_ownership = None
         recent_insider_buys = 0
 
         try:
-            # Query company for founder status
-            company = await self.session.get_one(Company, ticker, options=[])
+            # Use session.get() — Company PK is ticker
+            company = await self.session.get(Company, ticker)
             if company and company.is_founder_led:
-                founder_ownership = 0.05  # Assume 5% minimum if marked as founder-led
-            if company and hasattr(company, 'founder_ownership_pct'):
-                founder_ownership = float(company.founder_ownership_pct)
+                # Assume meaningful stake when flagged as founder-led but no exact % stored
+                founder_ownership = 0.05
 
-            # Check for recent insider purchases (last 30 days)
+            # Check for recent insider purchases (last 90 days — wider window than 30d for data coverage)
             try:
-                stmt = select(func.count(InsiderPurchase.id)).where(
+                stmt = _select(_func.count(InsiderPurchase.id)).where(
                     InsiderPurchase.ticker == ticker,
-                    InsiderPurchase.transaction_date >= datetime.utcnow() - timedelta(days=30)
+                    InsiderPurchase.transaction_date >= datetime.utcnow() - timedelta(days=90),
                 )
                 result = await self.session.execute(stmt)
                 recent_insider_buys = result.scalar() or 0
@@ -298,7 +296,7 @@ class CompanySelectionPipeline:
 
             # Try to get insider ownership from metrics
             metric = await self._load_company_metrics(ticker)
-            if metric and metric.insider_ownership_pct:
+            if metric and hasattr(metric, "insider_ownership_pct") and metric.insider_ownership_pct:
                 insider_ownership = float(metric.insider_ownership_pct)
 
         except Exception as e:

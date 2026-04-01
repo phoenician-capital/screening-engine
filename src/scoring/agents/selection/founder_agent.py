@@ -59,14 +59,27 @@ class FounderAgent(BaseAgent):
         if recent_insider_buys > 0:
             positives.append(f"Recent insider buying: {recent_insider_buys} transactions")
 
-        # Decision: pass if founder/insider ownership OR recent buys
+        no_data = (
+            founder_ownership is None
+            and insider_ownership is None
+            and recent_insider_buys == 0
+            and not founder_name
+        )
+
+        # Pass through when we have no data at all — the scoring stage will penalise
+        # the alignment dimension if ownership can't be confirmed.
+        # Only hard-reject when we have data AND it is clearly insufficient.
         passed = (
-            (founder_ownership is not None and founder_ownership >= self.min_founder_ownership)
+            no_data
+            or (founder_ownership is not None and founder_ownership >= self.min_founder_ownership)
             or (insider_ownership is not None and insider_ownership >= self.min_insider_ownership)
             or recent_insider_buys > 0
         )
 
-        reason = " | ".join(positives) if passed else " | ".join(flags) if flags else "No alignment signals"
+        if no_data:
+            reason = "Alignment data unavailable — deferring to scoring stage"
+        else:
+            reason = " | ".join(positives) if passed else " | ".join(flags) if flags else "No alignment signals"
 
         return AgentDecision(
             passed=passed,

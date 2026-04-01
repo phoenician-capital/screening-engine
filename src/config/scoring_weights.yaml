@@ -191,12 +191,14 @@ hard_filters:
   min_market_cap_usd: 250000000          # $250M
   max_market_cap_usd: 5000000000         # $5B
 
-  # Quality floors
-  min_gross_margin: 0.15                 # 15% floor
+  # Quality floors — calibrated to Phoenician mandate (asset-light, high-margin businesses)
+  min_gross_margin: 0.30                 # 30% floor (up from 15%) — eliminates commodity/low-margin businesses
+  min_roic: 0.08                         # 8% ROIC floor — basic capital efficiency gate
+  min_growth: 0.03                       # 3% 3-year revenue growth floor — eliminates stagnant/declining companies
   min_avg_daily_volume_usd: 250000       # $250K/day (relaxed for international)
 
-  # Leverage cap
-  max_leverage: 5.0                      # net_debt/EBITDA
+  # Leverage cap — tightened to align with selection FilterAgent default
+  max_leverage: 4.0                      # net_debt/EBITDA (down from 5.0x)
 
   # Excluded sectors (GICS codes and text names)
   excluded_gics_sectors:

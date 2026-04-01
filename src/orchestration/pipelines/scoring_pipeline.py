@@ -163,19 +163,29 @@ class ScoringPipeline:
 
             on_progress(ScreeningProgress(step="init", status="starting"))
 
-            # Purge stale duplicate recommendations — keep only one row per ticker
+            # Purge all stale recommendations for non-portfolio companies before the new run.
+            # Feedback rows are preserved (they carry analyst decisions used for learning)
+            # but their recommendation_id FK is nulled first to satisfy the constraint.
+            await self.session.execute(_text("""
+                WITH non_portfolio_recs AS (
+                    SELECT r.id
+                    FROM recommendations r
+                    WHERE r.ticker NOT IN (
+                        SELECT ticker FROM portfolio_holdings WHERE is_active = true
+                    )
+                )
+                UPDATE feedback
+                SET recommendation_id = NULL
+                WHERE recommendation_id IN (SELECT id FROM non_portfolio_recs)
+            """))
             await self.session.execute(_text("""
                 DELETE FROM recommendations
-                WHERE id NOT IN (
-                    SELECT DISTINCT ON (ticker) id
-                    FROM recommendations
-                    WHERE rank_score IS NOT NULL
-                    ORDER BY ticker, rank_score DESC NULLS LAST
+                WHERE ticker NOT IN (
+                    SELECT ticker FROM portfolio_holdings WHERE is_active = true
                 )
-                AND rank_score IS NOT NULL
             """))
             await self.session.commit()
-            logger.info("Deduped recommendations — one row per ticker retained")
+            logger.info("Purged all stale non-portfolio recommendations before new run")
 
             # 2. Get universe
             if tickers:
@@ -305,279 +315,4 @@ class ScoringPipeline:
                 "rank_score": r.rank_score,
             }
             for r in ranked
-        ]
-        logger.info("Portfolio context: %d holdings loaded", portfolio_avg.get("holding_count", 0))
-
-        # Load recent analyst decisions for feedback learning (last 60 days)
-        recent_feedback = await self.feedback_repo.get_recent_feedback(days=60)
-        feedback_context = _build_feedback_context(recent_feedback)
-        logger.info("Feedback context: %d recent decisions loaded", len(recent_feedback))
-
-        results: list[ScoringResult] = []
-        passed_filter = 0
-        sem = asyncio.Semaphore(20)  # 20 concurrent — agent calls are async, no blocking
-
-        async def _score_one(company) -> None:
-            async with sem:
-                # 1.5. SELECTION TEAM PRE-FILTER (NEW)
-                try:
-                    selection_pipeline = CompanySelectionPipeline(self.session)
-                    selection_result = await selection_pipeline.evaluate_company(company, None)
-
-                    if not selection_result.passed_selection:
-                        # Company rejected by selection team, skip scoring
-                        results.append(ScoringResult(
-                            ticker=company.ticker,
-                            fit_score=0,
-                            risk_score=100,
-                            rank_score=-100,
-                            disqualified=True,
-                            disqualify_reason=f"Selection filter: {selection_result.disqualification_reason}",
-                        ))
-                        logger.debug(f"✗ {company.ticker}: {selection_result.disqualification_reason}")
-                        return
-                except Exception as e:
-                    logger.warning(f"Selection pipeline error for {company.ticker}: {e}, continuing with normal scoring")
-                    pass  # Continue with normal scoring if selection fails
-
-                # 3. Get latest metrics
-                metrics = await self.metric_repo.get_latest(company.ticker)
-                if not metrics:
-                    logger.warning("No metrics for %s, skipping", company.ticker)
-                    return
-
-                # 3b. Skip companies with no usable financial data (unless bypassed for portfolio scans)
-                has_data = any([
-                    metrics.revenue is not None,
-                    metrics.ebit is not None,
-                    metrics.net_income is not None,
-                    metrics.total_assets is not None,
-                ])
-                if not has_data and not bypass_data_check:
-                    logger.debug("Skipping %s — no financial data", company.ticker)
-                    return
-
-                # 4. Hard filter
-                filter_result = self.hard_filter.check(
-                    ticker=company.ticker,
-                    gics_sector=company.gics_sector,
-                    gics_sub_industry=company.gics_sub_industry,
-                    market_cap=float(metrics.market_cap_usd) if metrics.market_cap_usd else None,
-                    net_debt_ebitda=float(metrics.net_debt_ebitda) if metrics.net_debt_ebitda else None,
-                    gross_margin=float(metrics.gross_margin) if metrics.gross_margin else None,
-                    country=company.country,
-                    avg_daily_volume=float(metrics.avg_daily_volume) if metrics.avg_daily_volume else None,
-                    net_income=float(metrics.net_income) if metrics.net_income else None,
-                    company_name=company.name,
-                    market_tier=getattr(company, "market_tier", 1) or 1,
-                )
-
-                if not filter_result.passed:
-                    results.append(ScoringResult(
-                        ticker=company.ticker,
-                        fit_score=0,
-                        risk_score=100,
-                        rank_score=-100,
-                        disqualified=True,
-                        disqualify_reason=filter_result.reason,
-                    ))
-                    return
-
-                nonlocal passed_filter
-                passed_filter += 1
-
-                # 5. Sector medians
-                sector_medians = {}
-                if company.gics_sector:
-                    sector_medians = await self.metric_repo.get_sector_medians(company.gics_sector)
-
-                # 6. Insider + transcript signals
-                cluster_purchases = list(
-                    await self.insider_repo.get_cluster_purchases_for_ticker(company.ticker, days=30)
-                )
-                transcript_doc = await self.doc_repo.get_latest_by_type(company.ticker, "transcript_analysis")
-                transcript_signals = (
-                    transcript_doc.meta.get("signals") if transcript_doc and transcript_doc.meta else None
-                )
-
-                # 7. Fetch 5-year historical income statements for agent scoring
-                historical = None
-                try:
-                    from src.ingestion.sources.market_data.client import _fetch_fmp_financials
-                    import httpx as _httpx
-                    from src.config.settings import settings as _settings
-                    key = _settings.ingestion.fmp_api_key
-                    if key:
-                        async with _httpx.AsyncClient(timeout=15) as _hc:
-                            r = await _hc.get(
-                                "https://financialmodelingprep.com/stable/income-statement",
-                                params={"symbol": company.ticker, "period": "annual",
-                                        "limit": 5, "apikey": key}
-                            )
-                            if r.status_code == 200 and r.json():
-                                historical = r.json()
-                except Exception:
-                    pass  # historical stays None — agent uses current year only
-
-                # Enrich sector medians with fallback when DB has insufficient data
-                enriched_sector_medians = dict(sector_medians) if sector_medians else {}
-                if company.gics_sector and not enriched_sector_medians.get("median_gross_margin"):
-                    fallback = _SECTOR_MEDIANS_FALLBACK.get(company.gics_sector, {})
-                    enriched_sector_medians.update(fallback)
-
-                # 8. Fit score (AI analyst agent — fully async, parallel)
-                fit_score, fit_criteria = await self.fit_scorer.score(
-                    company=company,
-                    metrics=metrics,
-                    sector_medians=enriched_sector_medians,
-                    claims=None,
-                    cluster_purchases=cluster_purchases,
-                    current_price=float(metrics.market_cap_usd / metrics.shares_outstanding)
-                        if metrics.market_cap_usd and metrics.shares_outstanding and metrics.shares_outstanding > 0
-                        else None,
-                    transcript_signals=transcript_signals,
-                    historical=historical,
-                    portfolio_avg=portfolio_avg,
-                    feedback_context=feedback_context,
-                )
-
-                # 8. Risk score — use LLM risk score if agent ran, else Python
-                llm_risk = next(
-                    (c for c in fit_criteria if c.name == "llm_risk_score"), None
-                )
-                if llm_risk is not None and llm_risk.score > 0:
-                    risk_score = min(100.0, max(0.0, llm_risk.score))
-                    risk_criteria = [llm_risk]
-                    logger.info("Risk score for %s: %.1f/100 (LLM)", company.ticker, risk_score)
-                else:
-                    risk_score, risk_criteria = self.risk_scorer.score(
-                        metrics=metrics, claims=None, country=company.country,
-                    )
-
-                # 9. Rank score
-                feedback_stats = await self.feedback_repo.count_by_action(company.ticker)
-                rank_score = self.ranker.compute_rank_score(fit_score, risk_score, feedback_stats)
-
-                all_criteria = [c.model_dump() for c in fit_criteria + risk_criteria]
-
-                # 10. Memo
-                memo_text, portfolio_comparison = await generate_memo(
-                    company=company, metrics=metrics,
-                    fit_score=fit_score, risk_score=risk_score,
-                    fit_criteria=fit_criteria, risk_criteria=risk_criteria,
-                    portfolio_avg=portfolio_avg,
-                )
-
-                # 11. Final gate — Tier 2 markets need a higher score
-                _tier = getattr(company, "market_tier", 1) or 1
-                if not self.hard_filter.passes_min_score(fit_score, market_tier=_tier):
-                    logger.debug("Skipping %s — fit score %.1f below minimum", company.ticker, fit_score)
-                    return
-
-                results.append(ScoringResult(
-                    ticker=company.ticker,
-                    fit_score=fit_score,
-                    risk_score=risk_score,
-                    rank_score=rank_score,
-                    criteria=fit_criteria + risk_criteria,
-                ))
-
-                # 12. Portfolio similarity badge
-                inspired_by = None
-                try:
-                    import redis as _redis
-                    r = _redis.Redis.from_url(settings.redis.url, decode_responses=True, socket_timeout=1)
-                    inspired_by = r.get(f"portfolio_similarity:{company.ticker}")
-                except Exception:
-                    pass
-
-                # 13. Persist recommendation
-                rec = Recommendation(
-                    ticker=company.ticker,
-                    scoring_run_id=scoring_run.id,
-                    fit_score=fit_score,
-                    risk_score=risk_score,
-                    rank_score=rank_score,
-                    memo_text=memo_text,
-                    portfolio_comparison=portfolio_comparison,
-                    scoring_detail={"criteria": all_criteria},
-                    inspired_by=inspired_by,
-                )
-                self.session.add(rec)
-
-        await asyncio.gather(*[_score_one(c) for c in companies], return_exceptions=True)
-
-        # Flush new recs to DB — with retry logic if transaction is aborted
-        max_flush_retries = 2
-        for attempt in range(max_flush_retries):
-            try:
-                await self.session.flush()
-                break
-            except Exception as e:
-                if attempt == 0:
-                    logger.warning(f"Flush attempt 1 failed: {e}, retrying with rollback")
-                    try:
-                        await self.session.rollback()
-                    except Exception:
-                        pass
-                else:
-                    logger.error(f"Flush failed after {max_flush_retries} attempts, continuing with query")
-                    raise
-
-        # Re-rank ALL recommendations across all runs by rank_score descending
-        # Deduplicate by ticker — keep only the highest rank_score per ticker
-        from sqlalchemy import update as _update, select as _select
-
-        try:
-            all_recs = (await self.session.execute(
-                _select(Recommendation)
-                .where(Recommendation.rank_score.isnot(None))
-                .where(Recommendation.rank_score > -50)
-                .order_by(Recommendation.rank_score.desc())
-            )).scalars().all()
-        except Exception as e:
-            logger.warning(f"Query error: {e}")
-            all_recs = []
-
-        # Deduplicate: keep only best score per ticker
-        seen_tickers: dict[str, Recommendation] = {}
-        for rec in all_recs:
-            if rec.ticker not in seen_tickers:
-                seen_tickers[rec.ticker] = rec
-            else:
-                # Mark duplicate as rank=None so it doesn't show
-                rec.rank = None
-
-        deduped = list(seen_tickers.values())
-        deduped.sort(key=lambda r: float(r.rank_score or 0), reverse=True)
-
-        # Clear all ranks first
-        await self.session.execute(_update(Recommendation).values(rank=None))
-
-        # Assign new ranks — no limit, show all qualifying companies
-        for i, rec in enumerate(deduped, 1):
-            rec.rank = i
-
-        ranked = deduped  # for logging
-
-        # 11. Update scoring run stats
-        scoring_run.tickers_scored = len(companies)
-        scoring_run.tickers_passed_filter = passed_filter
-
-        await self.session.commit()
-
-        logger.info(
-            "Scoring complete: %d scored, %d passed filter, %d ranked",
-            len(companies), passed_filter, len(ranked),
-        )
-
-        return [
-            {
-                "rank": i + 1,
-                "ticker": r.ticker,
-                "fit_score": r.fit_score,
-                "risk_score": r.risk_score,
-                "rank_score": r.rank_score,
-            }
-            for i, r in enumerate(ranked)
         ]
