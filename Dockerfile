@@ -3,9 +3,9 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm install && chmod +x node_modules/.bin/*
+RUN npm install
 COPY frontend/ .
-RUN npm run build
+RUN npx --yes vite build
 
 # Stage 2: Build backend with frontend
 FROM python:3.11-slim
