@@ -475,6 +475,7 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
     result = {
         "sector":               sector,
         "country":              country,
+        "company_name":         company_name_pro,
         "website":              website,
         "description":          description,
         "revenue":              revenue,
@@ -523,7 +524,9 @@ async def _fetch_yahoo_timeseries(ticker: str) -> dict[str, Any]:
 
     BASE  = "https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries"
     TYPES = "annualTotalRevenue,annualGrossProfit,annualNetIncome,annualOperatingIncome,annualFreeCashFlow,annualCapitalExpenditure"
-    P1, P2 = "1577836800", "1735689600"  # 2020-01-01 to 2025-01-01
+    import time as _time
+    P1 = "1577836800"  # 2020-01-01
+    P2 = str(int(_time.time()) + 86400)  # tomorrow (always current)
 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0",
@@ -618,10 +621,34 @@ async def _fetch_yahoo_timeseries(ticker: str) -> dict[str, Any]:
 async def _fetch_llm_financials(ticker: str, company_name: str, country: str) -> dict[str, Any]:
     """
     Last-resort LLM fallback — only used when both FMP and Yahoo timeseries fail.
+    Uses web search to retrieve financials, with a plain-completion retry if the
+    search path returns an empty response.
     """
     import json as _json
+
+    def _extract_json(text: str) -> dict | None:
+        """Pull a JSON object out of a Claude response."""
+        if not text:
+            return None
+        # Strip markdown fences
+        if "```" in text:
+            for part in text.split("```"):
+                part = part.strip()
+                if part.startswith("json"):
+                    part = part[4:].strip()
+                if part.startswith("{"):
+                    text = part
+                    break
+        start, end = text.find("{"), text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            return None
+        try:
+            return _json.loads(text[start:end + 1])
+        except Exception:
+            return None
+
     try:
-        from src.shared.llm.client_factory import complete_with_search
+        from src.shared.llm.client_factory import complete_with_search, complete as _complete
         from src.config.settings import settings
         from src.prompts.loader import load_prompt
 
@@ -629,30 +656,43 @@ async def _fetch_llm_financials(ticker: str, company_name: str, country: str) ->
         user   = load_prompt("ingestion/llm_financials.j2",
                              ticker=ticker, company_name=company_name, country=country)
 
+        # Attempt 1: web search (3 searches allowed)
         response = await complete_with_search(
             prompt=user,
             model=settings.llm.primary_model,
-            max_searches=1,
+            max_searches=3,
             system=system,
         )
 
-        text = response.strip()
-        if "```" in text:
-            parts = text.split("```")
-            for part in parts:
-                if "{" in part:
-                    text = part.strip()
-                    if text.startswith("json"):
-                        text = text[4:].strip()
-                    break
-        start, end = text.find("{"), text.rfind("}")
-        if start != -1 and end != -1:
-            text = text[start:end+1]
+        data = _extract_json(response.strip())
 
-        data = _json.loads(text)
-        logger.info("LLM financials for %s: revenue=%s gm=%s", ticker,
-                    data.get("revenue"), data.get("gross_margin"))
+        # Attempt 2: plain completion if search returned empty/unparseable
+        if data is None:
+            logger.debug("LLM financials search path empty for %s — retrying with plain completion", ticker)
+            fallback_prompt = (
+                f"Return ONLY a JSON object with annual financial data for {company_name} "
+                f"(ticker {ticker}, {country}). Use your training knowledge. "
+                f"Keys: revenue, gross_profit, gross_margin, ebit, ebit_margin, net_income, "
+                f"fcf, capex, net_debt, total_assets, roic, roe, revenue_growth, "
+                f"revenue_prior_year, market_cap_usd, sector, description, website, is_founder_led. "
+                f"All monetary values in USD. Output raw JSON only — no markdown, no explanation."
+            )
+            response2 = await _complete(
+                prompt=fallback_prompt,
+                model=settings.llm.primary_model,
+                max_tokens=1024,
+                temperature=0.0,
+            )
+            data = _extract_json(response2.strip())
+
+        if not data:
+            logger.warning("LLM financials: no parseable JSON for %s after 2 attempts", ticker)
+            return {}
+
+        logger.info("LLM financials for %s: revenue=%s gm=%s",
+                    ticker, data.get("revenue"), data.get("gross_margin"))
         return data
+
     except Exception as e:
         logger.warning("LLM financials failed for %s: %s", ticker, e)
         return {}
@@ -1084,34 +1124,59 @@ async def _get_intl_candidates(client: httpx.AsyncClient,
         text  = raw.strip()
         items = None
 
-        # Try direct parse first
-        try:
-            start = text.find("[")
-            end   = text.rfind("]")
-            if start != -1 and end != -1:
-                items = _json.loads(text[start:end+1])
-        except (_json.JSONDecodeError, Exception):
-            pass
+        def _extract_array(s: str) -> list | None:
+            """
+            Robustly extract a JSON array from a (potentially noisy) string.
+            Handles: markdown code fences, leading prose, embedded brackets in values.
+            """
+            decoder = _json.JSONDecoder()
+            # 1. JSON code fence: ```json [ ... ] ```
+            for fence_match in re.finditer(r"```(?:json)?\s*", s):
+                pos = fence_match.end()
+                if pos < len(s) and s[pos] == "[":
+                    try:
+                        obj, _ = decoder.raw_decode(s, pos)
+                        if isinstance(obj, list):
+                            return obj
+                    except Exception:
+                        pass
+            # 2. Use raw_decode from every '[' position — finds first *complete* array
+            #    (avoids rfind(']') picking up brackets inside string values)
+            pos = 0
+            while True:
+                pos = s.find("[", pos)
+                if pos == -1:
+                    break
+                try:
+                    obj, _ = decoder.raw_decode(s, pos)
+                    if isinstance(obj, list) and len(obj) > 0:
+                        return obj
+                except Exception:
+                    pos += 1
+            return None
 
-        # Fallback: ask Claude to re-extract the JSON array from its own response
+        # Try direct parse first
+        items = _extract_array(text)
+
+        # Fallback: ask Claude to re-extract — use plain complete() (no web search needed)
         if items is None:
             logger.info("Intl discovery JSON parse failed — asking Claude to re-extract array")
-            clean = await complete_with_search(
+            from src.shared.llm.client_factory import complete as _complete
+            # Pass up to 25k chars so we don't truncate a large array
+            clean = await _complete(
                 prompt=(
                     "Extract only the JSON array from the text below. "
-                    "Return ONLY the JSON array, nothing else.\n\n" + text[:6000]
+                    "Return ONLY the JSON array starting with [ and ending with ]. "
+                    "No explanation, no markdown fences, just the raw JSON array.\n\n"
+                    + text[:25000]
                 ),
                 model=_settings.llm.primary_model,
-                max_tokens=4000,
+                max_tokens=8000,
                 temperature=0.0,
-                max_searches=1,
             )
-            clean = clean.strip()
-            start = clean.find("[")
-            end   = clean.rfind("]")
-            if start == -1 or end == -1:
+            items = _extract_array(clean.strip())
+            if items is None:
                 raise ValueError("No JSON array in response after re-extraction")
-            items = _json.loads(clean[start:end+1])
         candidates: list[dict] = []
         for item in items:
             if not isinstance(item, dict):
@@ -1180,6 +1245,12 @@ async def screen_universe_global(
 
         # ── Fast path: Claude pre-selected tickers ────────────────────────────
         if preselected_tickers:
+            # Deduplicate while preserving order (same ticker may appear from NASDAQ + NYSE)
+            _dedup_seen: set[str] = set()
+            preselected_tickers = [
+                t for t in preselected_tickers
+                if not (t in _dedup_seen or _dedup_seen.add(t))  # type: ignore[func-returns-value]
+            ]
             logger.info("Fast path: fetching financials for %d pre-selected tickers", len(preselected_tickers))
             print(f"Fetching financials for {len(preselected_tickers)} Claude-selected candidates...", flush=True)
 
@@ -1195,32 +1266,93 @@ async def screen_universe_global(
             fmp_sem = asyncio.Semaphore(15)
             llm_sem = asyncio.Semaphore(8)
 
+            # Tickers with non-US exchange suffixes — always try all data sources
+            _INTL_SUFFIXES = (
+                ".ST", ".AX", ".TO", ".L", ".DE", ".SW", ".PA", ".AM", ".BR",
+                ".HE", ".OL", ".CO", ".IR", ".AS", ".T", ".SI", ".HK",
+                ".NZ", ".TA", ".WA", ".MI", ".MC",
+            )
+
+            def _is_intl_ticker(t: str) -> bool:
+                """Return True if the ticker has a non-US exchange suffix."""
+                upper = t.upper()
+                return any(upper.endswith(sfx) for sfx in _INTL_SUFFIXES)
+
             async def _process_preselected(ticker: str):
                 if stop_event.is_set():
                     return
                 co = all_map.get(ticker)
+                is_intl = co.get("is_intl", False) if co else _is_intl_ticker(ticker)
                 if not co:
-                    # Ticker not in our lists — build minimal stub for FMP lookup
+                    # Ticker not in our candidate map — build stub; detect region from suffix
+                    country = "US"
+                    for sfx, cc in ((".ST","SE"),(".AX","AU"),(".TO","CA"),(".L","GB"),
+                                    (".DE","DE"),(".SW","CH"),(".PA","FR"),(".HE","FI"),
+                                    (".OL","NO"),(".CO","DK"),(".TA","IL"),(".T","JP"),
+                                    (".SI","SG"),(".HK","HK"),(".NZ","NZ"),(".WA","PL")):
+                        if ticker.upper().endswith(sfx):
+                            country = cc
+                            is_intl = True
+                            break
                     co = {"ticker": ticker, "name": ticker, "market_cap": 500_000_000,
-                          "country": "US", "exchange": "", "cik": None, "is_intl": False}
+                          "country": country, "exchange": "", "cik": None,
+                          "is_intl": is_intl}
+
                 try:
                     fin: dict = {}
+                    source = "none"
+
+                    # ── Source 1: FMP (primary for US; also covers many intl tickers) ──
                     async with fmp_sem:
                         fmp_fin = await _fetch_fmp_financials(client, ticker)
                     if fmp_fin and not fmp_fin.get("excluded") and fmp_fin.get("revenue"):
                         fin = fmp_fin
-                    elif co.get("is_intl"):
-                        # Yahoo timeseries — free, no auth, works globally
+                        source = "fmp"
+
+                    # ── Source 2: Yahoo Finance timeseries (free, works globally) ──────
+                    # Try for ALL companies when FMP fails, not just is_intl.
+                    # Covers: Australian, Canadian, Swedish, and US companies FMP misses.
+                    if not fin.get("revenue"):
                         yts_fin = await _fetch_yahoo_timeseries(ticker)
                         if yts_fin and yts_fin.get("revenue"):
                             fin = yts_fin
-                        else:
-                            # Last resort: LLM fallback
-                            async with llm_sem:
-                                fin = await _fetch_llm_financials(ticker, co["name"], co.get("country",""))
+                            source = "yahoo"
+                            # Carry forward FMP company metadata (name, description) if available
+                            if fmp_fin and not fmp_fin.get("excluded"):
+                                for key in ("company_name", "description", "sector",
+                                            "website", "ceo_name", "is_founder_led",
+                                            "market_cap_fmp"):
+                                    if fmp_fin.get(key) and not fin.get(key):
+                                        fin[key] = fmp_fin[key]
+
+                    # ── Source 3: LLM web-search fallback (last resort) ──────────────
+                    # Used when both FMP and Yahoo return no revenue.
+                    if not fin.get("revenue"):
+                        logger.info("LLM fallback for %s (FMP+Yahoo both empty)", ticker)
+                        async with llm_sem:
+                            llm_fin = await _fetch_llm_financials(
+                                ticker, co.get("name", ticker), co.get("country", "")
+                            )
+                        if llm_fin and llm_fin.get("revenue"):
+                            fin = llm_fin
+                            source = "llm"
+                            # Carry forward any FMP/Yahoo metadata
+                            if fmp_fin and not fmp_fin.get("excluded"):
+                                for key in ("company_name", "description", "sector",
+                                            "website", "ceo_name"):
+                                    if fmp_fin.get(key) and not fin.get(key):
+                                        fin[key] = fmp_fin[key]
 
                     if not fin or fin.get("excluded"):
+                        logger.debug("Skip %s: all sources excluded or empty", ticker)
                         return
+
+                    # Drop companies with no revenue from any source
+                    if not fin.get("revenue"):
+                        logger.warning("Skip %s: no revenue from FMP, Yahoo, or LLM", ticker)
+                        return
+
+                    logger.debug("%s: financials from %s", ticker, source)
 
                     mc = fin.get("market_cap_fmp") or None
                     # If fin didn't include a market cap (e.g. Yahoo timeseries path),
@@ -1241,17 +1373,32 @@ async def screen_universe_global(
                                         mc = _to_usd(raw_mc, currency)
                         except Exception:
                             pass
-                    if mc is None or mc < min_market_cap or mc > max_market_cap:
-                        return  # Real market cap unknown or out of range — skip
+                    # If all MC sources failed, trust Claude's pre-selection and use
+                    # the candidate's placeholder rather than silently dropping the company.
+                    if mc is None:
+                        mc = co.get("market_cap") or 500_000_000
+                        logger.debug("No market cap for %s — using candidate placeholder $%.0fM",
+                                     ticker, mc / 1e6)
+                    # Hard-drop only if clearly out of range (not just unknown)
+                    if mc < min_market_cap * 0.5 or mc > max_market_cap * 2:
+                        return
                     country = fin.get("country") or co.get("country","US") or "US"
 
                     # Skip debt instruments
-                    name = co.get("name","")
+                    # Prefer FMP's canonical company name over the candidate stub
+                    name = fin.get("company_name") or co.get("name","") or ticker
                     _DEBT_KW = ("debenture","subordinated","notes due","% fixed","% senior",
                                 "preferred shares","depositary shares","warrant","rights",
                                 "unit trust","closed-end"," etf "," fund ")
                     if any(kw in name.lower() for kw in _DEBT_KW):
                         return
+
+                    # Build description: prefer FMP long-form, fall back to candidate rationale
+                    description = (fin.get("description") or "").strip()
+                    if not description and co.get("rationale"):
+                        description = co["rationale"]  # from intl discovery JSON
+                    if not description:
+                        description = f"{name} ({ticker}) — {co.get('country','')}"
 
                     company_info = {
                         "ticker":              ticker,
@@ -1263,22 +1410,16 @@ async def screen_universe_global(
                         "gics_industry_group": "",
                         "gics_sub_industry":   "",
                         "market_cap_usd":      float(mc) if mc else None,
-                        "description":         (fin.get("description") or "")[:2000],
+                        "description":         description[:2000],
                         "website":             fin.get("website") or "",
                         "cik":                 co.get("cik"),
                         "is_founder_led":      fin.get("is_founder_led"),
                         "founder_name":        fin.get("ceo_name") or "",
                         "is_active":           True,
-                        "discovery_source":    co.get("discovery_source", "nasdaq_api" if not co.get("is_intl") else "claude_dynamic"),
+                        "discovery_source":    co.get("discovery_source", "nasdaq_api" if not is_intl else "claude_dynamic"),
                         "market_tier":         co.get("market_tier", 1),
                     }
                     metrics = _compute_metrics(ticker, mc, fin.get("shares_outstanding"), fin)
-
-                    # Drop out-of-range market caps before counting toward max_companies
-                    if mc is not None and (mc < min_market_cap or mc > max_market_cap):
-                        logger.debug("Skip %s: market cap $%.0fM out of range", ticker, (mc or 0)/1e6)
-                        return
-
                     results.append({"company": company_info, "metrics": metrics})
                     n = len(results)
                     rev = fin.get("revenue") or 0
