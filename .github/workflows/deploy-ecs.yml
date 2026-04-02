@@ -4,65 +4,79 @@ on:
   push:
     branches: [main]
 
+env:
+  AWS_REGION: eu-north-1
+  ECR_REPOSITORY: phoenician-prod
+  ECS_CLUSTER: phoenician-prod-cluster
+  ECS_SERVICE: phoenician-prod-service
+
 jobs:
   deploy:
+    name: Build, Push & Deploy
     runs-on: ubuntu-latest
-    
+
     permissions:
       id-token: write
       contents: read
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v2
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: eu-north-1
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
-        run: |
-          aws ecr get-login-password --region eu-north-1 | docker login --username AWS --password-stdin $(aws sts get-caller-identity --query Account --output text).dkr.ecr.eu-north-1.amazonaws.com
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
 
-      - name: Build Docker image
+      - name: Build, tag, and push image to ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          docker build -t phoenician-capital-screening-engine:${{ github.sha }} .
-          docker tag phoenician-capital-screening-engine:${{ github.sha }} phoenician-capital-screening-engine:latest
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY"
+          docker build \
+            --tag "$IMAGE_URI:$IMAGE_TAG" \
+            --tag "$IMAGE_URI:latest" \
+            --cache-from "$IMAGE_URI:latest" \
+            .
+          docker push "$IMAGE_URI:$IMAGE_TAG"
+          docker push "$IMAGE_URI:latest"
+          echo "image=$IMAGE_URI:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
 
-      - name: Push to ECR
-        run: |
-          ECR_URI=$(aws sts get-caller-identity --query Account --output text).dkr.ecr.eu-north-1.amazonaws.com/phoenician-capital-screening-engine
-          docker tag phoenician-capital-screening-engine:latest $ECR_URI:latest
-          docker tag phoenician-capital-screening-engine:latest $ECR_URI:${{ github.sha }}
-          docker push $ECR_URI:latest
-          docker push $ECR_URI:${{ github.sha }}
-
-      - name: Update ECS service
+      - name: Deploy to ECS (force new deployment)
         run: |
           aws ecs update-service \
-            --cluster phoenician-capital-prod-cluster \
-            --service phoenician-capital-prod-api-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
             --force-new-deployment \
-            --region eu-north-1
+            --region "$AWS_REGION"
 
-      - name: Wait for deployment
+      - name: Wait for ECS service to stabilize
         run: |
-          for i in {1..60}; do
-            RUNNING=$(aws ecs describe-services --cluster phoenician-capital-prod-cluster --services phoenician-capital-prod-api-service --region eu-north-1 --query 'services[0].runningCount' --output text)
-            DESIRED=$(aws ecs describe-services --cluster phoenician-capital-prod-cluster --services phoenician-capital-prod-api-service --region eu-north-1 --query 'services[0].desiredCount' --output text)
-            if [ "$RUNNING" -eq "$DESIRED" ]; then
-              echo "✅ Deployment complete!"
-              exit 0
-            fi
-            echo "Running: $RUNNING / Desired: $DESIRED"
-            sleep 3
-          done
-          echo "⚠️  Deployment timeout"
+          echo "Waiting for ECS service to reach steady state..."
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --region "$AWS_REGION"
+          echo "ECS service is stable."
 
       - name: Deployment summary
         run: |
-          echo "✨ Deployment complete!"
-          aws ecs describe-services --cluster phoenician-capital-prod-cluster --services phoenician-capital-prod-api-service --region eu-north-1 --query 'services[0].[serviceName,desiredCount,runningCount,deployments[0].status]' --output table
+          echo "### Deployment Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Image:** ${{ steps.build-image.outputs.image }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Cluster:** $ECS_CLUSTER" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Service:** $ECS_SERVICE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Commit:** ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+          aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --region "$AWS_REGION" \
+            --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount}' \
+            --output table
