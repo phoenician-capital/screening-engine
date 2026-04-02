@@ -8,6 +8,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+from typing import Callable, Optional
 
 from sqlalchemy import select as _select, func as _func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,16 +49,23 @@ class CompanySelectionPipeline:
         self.red_flag_agent = RedFlagAgent(session)
 
     async def select_candidates(
-        self, companies: list[Company], metrics_map: dict[str, Metric]
+        self,
+        companies: list[Company],
+        metrics_map: dict[str, Metric],
+        on_agent_progress: Optional[Callable[[str, str], None]] = None,
     ) -> list[SelectionResult]:
         """
         Run all companies through selection pipeline.
         Returns list of SelectionResult with pass/fail decisions.
+
+        on_agent_progress(ticker, agent_id) is called just before each agent runs.
         """
         results = []
 
         for company in companies:
-            result = await self.evaluate_company(company, metrics_map.get(company.ticker))
+            result = await self.evaluate_company(
+                company, metrics_map.get(company.ticker), on_agent_progress
+            )
             results.append(result)
 
             # Log result
@@ -76,9 +84,19 @@ class CompanySelectionPipeline:
         return results
 
     async def evaluate_company(
-        self, company: Company, metric: Metric | None
+        self,
+        company: Company,
+        metric: Metric | None,
+        on_agent_progress: Optional[Callable[[str, str], None]] = None,
     ) -> SelectionResult:
         """Evaluate one company through all 5 selection agents."""
+
+        def _notify(agent_id: str):
+            if on_agent_progress:
+                try:
+                    on_agent_progress(company.ticker, agent_id)
+                except Exception:
+                    pass
 
         filter_results = {}
 
@@ -97,11 +115,12 @@ class CompanySelectionPipeline:
         )
 
         # 1. FILTER AGENT — Hard metrics gates
+        _notify("filter")
         filter_decision = await self.filter_agent.evaluate(
             metrics=FilterMetrics(
                 gross_margin=metric.gross_margin if metric else None,
                 roic=metric.roic if metric else None,
-                revenue_growth_3yr=metric.revenue_growth_3yr if metric else None,
+                revenue_growth_3yr=metric.revenue_growth_3yr_cagr if metric else None,
                 net_debt_ebitda=metric.net_debt_ebitda if metric else None,
                 net_income=metric.net_income if metric else None,
             )
@@ -117,6 +136,7 @@ class CompanySelectionPipeline:
             )
 
         # 2. BUSINESS MODEL AGENT — Clarity check
+        _notify("business_model")
         business_decision = await self.business_model_agent.evaluate(
             ticker=company.ticker,
             company_name=company.name,
@@ -134,6 +154,7 @@ class CompanySelectionPipeline:
             )
 
         # 3. FOUNDER AGENT — Alignment check
+        _notify("founder")
         founder_decision = await self.founder_agent.evaluate(
             founder_ownership=founder_ownership,
             insider_ownership=insider_ownership,
@@ -151,6 +172,7 @@ class CompanySelectionPipeline:
             )
 
         # 4. GROWTH AGENT — Growth quality
+        _notify("growth")
         growth_decision = await self.growth_agent.evaluate(
             organic_revenue_growth=organic_revenue_growth,
             total_revenue_growth=metric.revenue_growth_3yr_cagr if metric else None,
@@ -169,6 +191,7 @@ class CompanySelectionPipeline:
             )
 
         # 5. RED FLAG AGENT — Catch learned red flags
+        _notify("red_flag")
         # Calculate derived metrics
         buyback_to_fcf_ratio = None
         if metric and metric.stock_repurchased and metric.fcf and metric.fcf > 0:
@@ -326,9 +349,11 @@ class CompanySelectionPipeline:
         if not metric:
             return None
 
-        # Use 3-year CAGR as approximation of organic growth
-        # In practice, would subtract acquisition contribution
+        # Prefer 3-year CAGR; fall back to YoY when CAGR is unavailable
         if metric.revenue_growth_3yr_cagr:
             return float(metric.revenue_growth_3yr_cagr)
+
+        if metric.revenue_growth_yoy:
+            return float(metric.revenue_growth_yoy)
 
         return None

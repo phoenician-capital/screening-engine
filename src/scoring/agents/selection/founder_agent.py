@@ -43,8 +43,9 @@ class FounderAgent(BaseAgent):
                     f"Founder ownership only {founder_ownership:.1%} (< {self.min_founder_ownership:.0%})"
                 )
         elif founder_name:
-            # Founder name present but no ownership data
-            flags.append(f"Founder identified ({founder_name}) but ownership % unknown")
+            # Founder name present but no ownership data — treat as tentative positive,
+            # scoring stage will penalise if alignment can't be confirmed
+            positives.append(f"Founder-led ({founder_name}) — ownership data unavailable")
 
         # Insider ownership check
         if insider_ownership is not None:
@@ -71,6 +72,7 @@ class FounderAgent(BaseAgent):
         # Only hard-reject when we have data AND it is clearly insufficient.
         passed = (
             no_data
+            or bool(founder_name)  # named founder = pass, scoring handles alignment
             or (founder_ownership is not None and founder_ownership >= self.min_founder_ownership)
             or (insider_ownership is not None and insider_ownership >= self.min_insider_ownership)
             or recent_insider_buys > 0

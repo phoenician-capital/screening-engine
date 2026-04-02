@@ -157,6 +157,12 @@ class RedFlagAgent(BaseAgent):
             for pattern in patterns:
                 metric = pattern.metric_name
                 if metric:
+                    # pattern_metadata may not exist in older DB schemas — access safely
+                    meta = {}
+                    try:
+                        meta = pattern.pattern_metadata or {}
+                    except Exception:
+                        pass
                     learned_dict[metric] = {
                         "confidence": pattern.confidence,
                         "suggested_threshold": (
@@ -169,15 +175,14 @@ class RedFlagAgent(BaseAgent):
                             if pattern.old_threshold
                             else None
                         ),
-                        "issue": pattern.metadata.get("issue"),
+                        "issue": meta.get("issue"),
                     }
-                    logger.debug(
-                        f"Loaded learned pattern: {metric} → "
-                        f"{learned_dict[metric]['suggested_threshold']} "
-                        f"(confidence {pattern.confidence:.0%})"
-                    )
-
             return learned_dict
         except Exception as e:
+            # Rollback to prevent cascading transaction abort on the shared session
+            try:
+                await self.session.rollback()
+            except Exception:
+                pass
             logger.warning(f"Failed to load learned patterns: {e}")
             return {}

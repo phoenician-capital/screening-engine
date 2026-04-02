@@ -142,20 +142,47 @@ class SingleCompanyScorer:
                     else None
                 )
 
-                # 6. Score with AI analyst
+                # 6. Fetch 5-year historical metrics for trend analysis + DCF
+                historical_metrics = await metric_repo.get_history(
+                    company.ticker, period_type="annual", limit=5
+                )
+                historical: list[dict] | None = None
+                if historical_metrics:
+                    historical = []
+                    for m in historical_metrics:
+                        # Derive grossProfit from gross_profit or revenue * gross_margin
+                        gross_profit = None
+                        if m.gross_profit is not None:
+                            gross_profit = float(m.gross_profit)
+                        elif m.revenue is not None and m.gross_margin is not None:
+                            gross_profit = float(m.revenue) * float(m.gross_margin)
+
+                        historical.append({
+                            "date": m.period_end.isoformat() if m.period_end else "",
+                            "revenue":    float(m.revenue)    if m.revenue    is not None else None,
+                            "grossProfit": gross_profit,
+                            "ebit":       float(m.ebit)       if m.ebit       is not None else None,
+                            "netIncome":  float(m.net_income) if m.net_income is not None else None,
+                        })
+
+                # Compute current price from market cap / shares
+                current_price: float | None = None
+                if (
+                    metrics.market_cap_usd
+                    and metrics.shares_outstanding
+                    and float(metrics.shares_outstanding) > 0
+                ):
+                    current_price = float(metrics.market_cap_usd) / float(metrics.shares_outstanding)
+
                 fit_score, fit_criteria = await self.fit_scorer.score(
                     company=company,
                     metrics=metrics,
                     sector_medians=sector_medians,
                     claims=None,
                     cluster_purchases=cluster_purchases,
-                    current_price=float(metrics.market_cap_usd / metrics.shares_outstanding)
-                    if metrics.market_cap_usd
-                    and metrics.shares_outstanding
-                    and metrics.shares_outstanding > 0
-                    else None,
+                    current_price=current_price,
                     transcript_signals=transcript_signals,
-                    historical=None,  # TODO: fetch if needed
+                    historical=historical,
                     portfolio_avg=shared_context.get("portfolio_avg", {}),
                     feedback_context=shared_context.get("feedback_context", ""),
                 )
@@ -229,8 +256,8 @@ class SingleCompanyScorer:
                 )
 
         except Exception as e:
-            logger.warning(
-                f"Error scoring {company.ticker}: {type(e).__name__}: {e}", exc_info=False
+            logger.exception(
+                f"Error scoring {company.ticker}: {type(e).__name__}: {e}"
             )
             try:
                 async with factory() as session:

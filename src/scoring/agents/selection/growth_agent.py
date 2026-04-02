@@ -66,13 +66,23 @@ class GrowthAgent(BaseAgent):
         elif fcf is not None and fcf <= 0:
             flags.append("Growth not converting to positive FCF")
 
-        # Decision: pass if organic growth present OR strategic acquisitions with FCF
-        passed = (
-            (organic_revenue_growth is not None and organic_revenue_growth >= self.min_organic_growth)
-            or (major_acquisitions_3yr > 0 and fcf is not None and fcf > 0)
+        # Fail-open when no growth data is available at all — let the LLM analyst decide.
+        # Only reject on EVIDENCE of bad growth, never on missing data alone.
+        has_any_growth_data = (
+            organic_revenue_growth is not None or total_revenue_growth is not None
         )
 
-        reason = " | ".join(positives) if passed else " | ".join(flags) if flags else "Growth profile unclear"
+        if not has_any_growth_data and major_acquisitions_3yr == 0:
+            # No data to evaluate — pass through to scoring
+            passed = True
+            reason = "Growth data unavailable — passing to LLM analysis"
+        else:
+            passed = (
+                (organic_revenue_growth is not None and organic_revenue_growth >= self.min_organic_growth)
+                or (total_revenue_growth is not None and total_revenue_growth >= self.min_organic_growth)
+                or (major_acquisitions_3yr > 0 and fcf is not None and fcf > 0)
+            )
+            reason = " | ".join(positives) if passed else " | ".join(flags) if flags else "Insufficient growth evidence"
 
         return AgentDecision(
             passed=passed,

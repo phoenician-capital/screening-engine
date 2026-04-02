@@ -4,13 +4,40 @@ Unified LLM client factory — routes to Anthropic, OpenAI, or Google based on m
 
 from __future__ import annotations
 
+import asyncio
 import enum
 import logging
+import random
 from typing import Any
 
 from src.config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+# Maximum retries on transient errors (rate-limit, 529 overloaded, network glitches)
+_MAX_RETRIES = 4
+_BASE_BACKOFF = 2.0  # seconds — doubles each attempt, plus jitter
+
+# Module-level singletons — reuse across all calls to avoid per-call httpx client creation
+# which causes "cannot schedule new futures after shutdown" under concurrency
+_anthropic_client = None
+_openai_client = None
+
+
+def _get_anthropic_client():
+    global _anthropic_client
+    if _anthropic_client is None:
+        import anthropic
+        _anthropic_client = anthropic.AsyncAnthropic(api_key=settings.llm.anthropic_api_key)
+    return _anthropic_client
+
+
+def _get_openai_client():
+    global _openai_client
+    if _openai_client is None:
+        import openai
+        _openai_client = openai.AsyncOpenAI(api_key=settings.llm.openai_api_key)
+    return _openai_client
 
 
 class LLMProvider(str, enum.Enum):
@@ -58,31 +85,60 @@ async def complete(
         raise ValueError(f"Unknown provider for model: {model}")
 
 
+def _is_retryable(exc: Exception) -> bool:
+    """Return True if this exception is a transient error worth retrying."""
+    msg = str(exc).lower()
+    retryable_signals = (
+        "rate_limit", "rate limit", "429", "529", "overloaded",
+        "timeout", "connection", "network", "service unavailable", "503",
+        "internal server error", "500",
+    )
+    return any(s in msg for s in retryable_signals)
+
+
+async def _with_retry(coro_fn, *args, **kwargs) -> str:
+    """Call an async coroutine function with exponential backoff on transient errors."""
+    last_exc: Exception | None = None
+    for attempt in range(_MAX_RETRIES):
+        try:
+            return await coro_fn(*args, **kwargs)
+        except Exception as exc:
+            if not _is_retryable(exc) or attempt == _MAX_RETRIES - 1:
+                raise
+            wait = _BASE_BACKOFF * (2 ** attempt) + random.uniform(0, 1)
+            logger.warning(
+                "LLM transient error (attempt %d/%d): %s — retrying in %.1fs",
+                attempt + 1, _MAX_RETRIES, exc, wait,
+            )
+            last_exc = exc
+            await asyncio.sleep(wait)
+    raise last_exc  # type: ignore[misc]
+
+
 async def _anthropic_complete(
     prompt: str, model: str, system: str | None, max_tokens: int, temperature: float
 ) -> str:
-    import anthropic
+    async def _call():
+        client = _get_anthropic_client()
+        messages = [{"role": "user", "content": prompt}]
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": messages,
+        }
+        if system:
+            kwargs["system"] = system
+        response = await client.messages.create(**kwargs)
+        return response.content[0].text
 
-    client = anthropic.AsyncAnthropic(api_key=settings.llm.anthropic_api_key)
-    messages = [{"role": "user", "content": prompt}]
-    kwargs: dict[str, Any] = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "messages": messages,
-    }
-    if system:
-        kwargs["system"] = system
-    response = await client.messages.create(**kwargs)
-    return response.content[0].text
+    return await _with_retry(_call)
 
 
 async def _openai_complete(
     prompt: str, model: str, system: str | None, max_tokens: int, temperature: float
 ) -> str:
-    import openai
-
-    client = openai.AsyncOpenAI(api_key=settings.llm.openai_api_key)
+    client = _get_openai_client()
     messages = []
     if system:
         messages.append({"role": "system", "content": system})
@@ -148,43 +204,35 @@ async def complete_with_search(
     max_searches: int = 5,
 ) -> str:
     """Send a completion request to Claude with web search enabled."""
-    import anthropic
+    async def _call():
+        client = _get_anthropic_client()
+        messages = [{"role": "user", "content": prompt}]
+        kwargs: dict[str, Any] = {
+            "model": model,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+            "messages": messages,
+            "tools": [
+                {
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": max_searches,
+                }
+            ],
+        }
+        if system:
+            kwargs["system"] = system
+        response = await client.messages.create(**kwargs)
+        text_parts = [block.text for block in response.content if hasattr(block, "text")]
+        return "\n".join(text_parts)
 
-    client = anthropic.AsyncAnthropic(api_key=settings.llm.anthropic_api_key)
-    messages = [{"role": "user", "content": prompt}]
-    kwargs: dict[str, Any] = {
-        "model": model,
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "messages": messages,
-        "tools": [
-            {
-                "type": "web_search_20250305",
-                "name": "web_search",
-                "max_uses": max_searches,
-            }
-        ],
-    }
-    if system:
-        kwargs["system"] = system
-
-    response = await client.messages.create(**kwargs)
-
-    # Extract text blocks from the response (skip tool_use / search result blocks)
-    text_parts = []
-    for block in response.content:
-        if hasattr(block, "text"):
-            text_parts.append(block.text)
-
-    return "\n".join(text_parts)
+    return await _with_retry(_call)
 
 
 def get_llm_client(provider: LLMProvider | None = None):
-    """Return the raw provider client for advanced use."""
-    if provider == LLMProvider.ANTHROPIC:
-        import anthropic
-        return anthropic.AsyncAnthropic(api_key=settings.llm.anthropic_api_key)
+    """Return the raw provider client for advanced use. Defaults to Anthropic."""
+    if provider is None or provider == LLMProvider.ANTHROPIC:
+        return _get_anthropic_client()
     elif provider == LLMProvider.OPENAI:
-        import openai
-        return openai.AsyncOpenAI(api_key=settings.llm.openai_api_key)
+        return _get_openai_client()
     raise ValueError(f"Raw client not supported for: {provider}")

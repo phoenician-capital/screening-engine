@@ -78,6 +78,7 @@ class ScoringResult(BaseModel):
     fit_score: float
     risk_score: float
     rank_score: float
+    rank: int | None = None
     criteria: list[CriterionScore] = []
     disqualified: bool = False
     disqualify_reason: str | None = None

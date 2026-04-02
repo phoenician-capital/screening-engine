@@ -84,7 +84,7 @@ class ScreeningCoordinator:
                 )
             )
 
-            companies = await self._pre_filter_companies(companies, t0)
+            companies = await self._pre_filter_companies(companies, t0, on_progress)
 
             on_progress(
                 ScreeningProgress(
@@ -195,20 +195,41 @@ class ScreeningCoordinator:
         self,
         companies: list[Company],
         t0: float,
+        on_progress: Callable[[ScreeningProgress], None] | None = None,
     ) -> list[Company]:
         """
         Run the 5-agent SelectionPipeline on all companies and return only those
-        that pass. This eliminates low-quality candidates before the expensive
-        per-company LLM scoring step.
+        that pass.
+
+        Each company is evaluated in its own isolated DB session so a single DB error
+        (e.g. a failed transaction on one company) cannot cascade and kill the rest.
         """
         engine = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
         factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
-        try:
-            async with factory() as session:
-                metric_repo = MetricRepository(session)
+        # Mutable counter shared with the per-agent callback
+        _companies_done: list[int] = [0]
 
-                # Load all metrics concurrently (one DB hit per company, in parallel)
+        def _agent_cb(ticker: str, agent_id: str) -> None:
+            if on_progress:
+                on_progress(
+                    ScreeningProgress(
+                        step="selection",
+                        status="in_progress",
+                        current_ticker=ticker,
+                        current_agent=agent_id,
+                        companies_scored=_companies_done[0],
+                        total_companies=len(companies),
+                        elapsed_seconds=time.time() - t0,
+                    )
+                )
+
+        try:
+            # ── Step 1: Bulk-load all metrics in a single session (fast, one round-trip) ──
+            metrics_map: dict[str, object] = {}
+            async with factory() as bulk_session:
+                metric_repo = MetricRepository(bulk_session)
+
                 async def _load_metric(company: Company):
                     try:
                         return company.ticker, await metric_repo.get_latest(company.ticker)
@@ -224,35 +245,65 @@ class ScreeningCoordinator:
                     if metric is not None
                 }
 
-                # Run all companies through the 5-agent selection pipeline
-                selection_pipeline = CompanySelectionPipeline(session)
-                results = await selection_pipeline.select_candidates(companies, metrics_map)
+            # ── Step 2: Evaluate each company in its OWN isolated session ──────────────
+            # Isolation guarantees that one company's DB error (failed transaction,
+            # missing column, FK violation) cannot cascade to the others.
+            results = []
 
-                passed_tickers = {r.ticker for r in results if r.passed_selection}
-                filtered = [c for c in companies if c.ticker in passed_tickers]
+            for company in companies:
+                async with factory() as company_session:
+                    try:
+                        pipeline = CompanySelectionPipeline(company_session)
+                        result = await pipeline.evaluate_company(
+                            company,
+                            metrics_map.get(company.ticker),
+                            on_agent_progress=_agent_cb,
+                        )
+                        results.append(result)
+                        _companies_done[0] += 1
 
-                rejected_count = len(companies) - len(filtered)
-                logger.info(
-                    f"Selection pre-filter: {len(filtered)}/{len(companies)} passed "
-                    f"({rejected_count} rejected before LLM scoring) "
-                    f"in {time.time() - t0:.1f}s"
-                )
+                        status = "✓" if result.passed_selection else "✗"
+                        logger.debug(
+                            f"{status} {company.ticker}: "
+                            f"{result.disqualification_reason or 'SELECTED'}"
+                        )
+                    except Exception as exc:
+                        # Single-company failure — log and treat as passed (fail-open)
+                        # so a code bug never silently removes a good company from scoring
+                        logger.warning(
+                            "Selection pipeline error for %s (%s: %s) — passing to scorer",
+                            company.ticker, type(exc).__name__, exc,
+                        )
+                        from src.orchestration.pipelines.selection_pipeline import SelectionResult
+                        results.append(SelectionResult(
+                            ticker=company.ticker,
+                            passed_selection=True,
+                            filter_results={},
+                            disqualification_reason=None,
+                        ))
+                        _companies_done[0] += 1
 
-                # Log the most common rejection reasons to make the filter transparent
-                rejections = [r for r in results if not r.passed_selection and r.disqualification_reason]
-                if rejections:
-                    first_reasons = [r.disqualification_reason.split(" | ")[0] for r in rejections]
-                    for reason, count in Counter(first_reasons).most_common(5):
-                        logger.info(f"  Rejected {count}x: {reason}")
+            # ── Step 3: Summarise ────────────────────────────────────────────────────
+            passed_count = sum(1 for r in results if r.passed_selection)
+            logger.info(
+                "Selection pre-filter: %d/%d passed (%d rejected) in %.1fs",
+                passed_count, len(companies), len(companies) - passed_count,
+                time.time() - t0,
+            )
 
-                return filtered
+            rejections = [r for r in results if not r.passed_selection and r.disqualification_reason]
+            if rejections:
+                first_reasons = [r.disqualification_reason.split(" | ")[0] for r in rejections]
+                for reason, count in Counter(first_reasons).most_common(5):
+                    logger.info("  Rejected %dx: %s", count, reason)
+
+            passed_tickers = {r.ticker for r in results if r.passed_selection}
+            return [c for c in companies if c.ticker in passed_tickers]
 
         except Exception as e:
-            # If pre-filter fails for any reason, log and fall back to full list
-            # so a bug here doesn't silently kill the entire screening run
             logger.error(
-                f"Selection pre-filter failed ({type(e).__name__}: {e}) — "
-                f"falling back to unfiltered list"
+                "Selection pre-filter failed (%s: %s) — falling back to unfiltered list",
+                type(e).__name__, e,
             )
             return companies
 

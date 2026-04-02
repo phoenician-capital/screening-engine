@@ -8,12 +8,13 @@ from typing import Optional
 class ScreeningProgress:
     """Real-time progress update from coordinator."""
 
-    step: str  # "discovery", "scoring", "retry", "ranking", "complete"
+    step: str  # "discovery", "selection", "scoring", "ranking", "complete"
     status: str = "in_progress"  # "starting", "in_progress", "complete", "failed"
     total_companies: int = 0
     companies_scored: int = 0
     failed_companies: int = 0
     current_ticker: Optional[str] = None
+    current_agent: Optional[str] = None   # active selection agent: filter|business_model|founder|growth|red_flag
     total_ranked: int = 0
     error_message: Optional[str] = None
     elapsed_seconds: float = 0

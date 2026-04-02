@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from src.scoring.agents.base_agent import AgentDecision, BaseAgent
-from src.shared.llm.client_factory import get_llm_client
+from src.shared.llm.client_factory import complete as _llm_complete
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +18,6 @@ class BusinessModelAgent(BaseAgent):
 
     def __init__(self):
         super().__init__("BusinessModelAgent")
-        self.llm = get_llm_client()
 
     async def evaluate(
         self,
@@ -86,15 +85,27 @@ Example: ["Unclear which segment is primary", "Too many unrelated businesses"]
 Be strict — conglomerates should fail.
 """
         try:
-            response = await self.llm.complete(
-                prompt, model="claude-haiku", temperature=0, output_format="json"
+            import json
+            response = await _llm_complete(
+                prompt,
+                model="claude-haiku-4-5",
+                temperature=0,
+                max_tokens=256,
             )
-            # Parse the response as JSON list
             if isinstance(response, str):
-                import json
-                issues = json.loads(response)
-                return issues if issues else []
-            return response if isinstance(response, list) else []
+                # Strip markdown fences if present
+                text = response.strip()
+                if "```" in text:
+                    for part in text.split("```"):
+                        part = part.strip().lstrip("json").strip()
+                        if part.startswith("["):
+                            text = part
+                            break
+                start, end = text.find("["), text.rfind("]")
+                if start != -1 and end != -1:
+                    issues = json.loads(text[start:end+1])
+                    return issues if isinstance(issues, list) else []
+            return []
         except Exception as e:
             logger.warning(f"Failed to assess clarity for description: {e}")
             return []

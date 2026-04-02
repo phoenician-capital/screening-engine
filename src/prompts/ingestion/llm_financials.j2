@@ -1,31 +1,8 @@
-Look up the most recent annual financial data for {{ company_name }} (ticker: {{ ticker }}, country: {{ country }}).
+Search for the most recent annual financials for {{ company_name }} (ticker: {{ ticker }}, country: {{ country }}).
 
-Search for their annual report, investor relations page, or financial data. Be thorough — try multiple sources.
+Search their investor relations page, annual report, or financial databases. Use FY2024 or FY2023 data.
 
-Return ONLY a valid JSON object with these exact keys (use null only if truly unavailable after searching):
-{
-  "revenue": <most recent annual revenue in USD as integer, e.g. 500000000 for $500M>,
-  "gross_profit": <gross profit in USD as integer or null>,
-  "gross_margin": <gross margin as decimal 0-1, e.g. 0.45 for 45%>,
-  "ebit": <operating income/EBIT in USD as integer or null>,
-  "ebit_margin": <EBIT margin as decimal 0-1 or null>,
-  "net_income": <net income in USD as integer>,
-  "fcf": <free cash flow = operating cash flow minus capex, in USD as integer or null>,
-  "capex": <capital expenditure in USD as integer or null>,
-  "net_debt": <total debt minus cash, in USD as integer or null>,
-  "total_assets": <total assets in USD as integer or null>,
-  "roic": <return on invested capital as decimal 0-1, e.g. 0.15 for 15%, or null>,
-  "roe": <return on equity as decimal 0-1 or null>,
-  "revenue_growth": <YoY revenue growth as decimal e.g. 0.12 for 12% growth>,
-  "revenue_prior_year": <prior year revenue in USD as integer or null>,
-  "market_cap_usd": <current market capitalisation in USD as integer>,
-  "shares_outstanding": <shares outstanding as integer or null>,
-  "sector": "<GICS sector name, e.g. Information Technology, Consumer Staples, Industrials>",
-  "description": "<one sentence company description>",
-  "website": "<company website URL>",
-  "is_founder_led": <true if founder or family member is CEO, false otherwise, null if unknown>
-}
+After searching, output ONLY this JSON object (no other text, no markdown fences):
+{"revenue":<annual revenue in USD, integer>,"gross_profit":<gross profit USD integer or null>,"gross_margin":<gross margin 0-1 decimal e.g. 0.62>,"ebit":<operating income USD integer or null>,"ebit_margin":<EBIT margin 0-1 or null>,"net_income":<net income USD integer>,"fcf":<operating cash flow minus capex, USD integer or null>,"capex":<capex USD integer or null>,"net_debt":<total debt minus cash USD integer or null>,"total_assets":<total assets USD integer or null>,"roic":<ROIC as 0-1 decimal or null>,"roe":<ROE 0-1 decimal or null>,"revenue_growth":<YoY revenue growth 0-1 decimal e.g. 0.15>,"revenue_prior_year":<prior year revenue USD integer or null>,"market_cap_usd":<current market cap USD integer>,"sector":<GICS sector string>,"description":<one sentence description>,"website":<URL>,"is_founder_led":<true/false/null>}
 
-IMPORTANT: Convert ALL monetary values to USD. Use current FX rates.
-Use the most recent completed fiscal year (FY2024 or FY2023).
-Do not leave revenue, net_income, gross_margin, or market_cap_usd as null — search harder.
+Convert all values to USD. Do NOT output null for revenue, gross_margin, net_income, or market_cap_usd — those are required.

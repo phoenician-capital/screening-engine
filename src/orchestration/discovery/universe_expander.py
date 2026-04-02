@@ -200,6 +200,18 @@ class UniverseExpander:
         intl_map = {c["ticker"]: {**c, "is_intl": True}  for c in intl_raw}
         combined_map = {**us_map, **intl_map}
 
+        # Deduplicate preserving order (same ticker from NASDAQ + NYSE can appear twice)
+        seen: set[str] = set()
+        unique_preselected: list[str] = []
+        for t in preselected:
+            if t not in seen:
+                seen.add(t)
+                unique_preselected.append(t)
+        if len(unique_preselected) < len(preselected):
+            logger.info("Deduplicated pre-selected list: %d → %d tickers",
+                        len(preselected), len(unique_preselected))
+        preselected = unique_preselected
+
         results = await screen_universe_global(
             min_market_cap=min_cap,
             max_market_cap=max_cap,
@@ -218,6 +230,7 @@ class UniverseExpander:
         import psycopg2, psycopg2.extras, json
 
         tickers_added: list[str] = []
+        conn = None
         try:
             conn = psycopg2.connect(
                 host=settings.db.host, port=settings.db.port,
@@ -261,8 +274,17 @@ class UniverseExpander:
                     ))
 
                     # Upsert metrics
+                    _MAX_NUMERIC = 9_999_999_999_999.0  # PostgreSQL NUMERIC precision guard
+
                     def _f(v):
-                        return float(v) if v is not None else None
+                        if v is None:
+                            return None
+                        try:
+                            fv = float(v)
+                            # Clamp to prevent numeric field overflow on very large values
+                            return max(-_MAX_NUMERIC, min(_MAX_NUMERIC, fv))
+                        except (TypeError, ValueError):
+                            return None
 
                     cur.execute("""
                         INSERT INTO metrics
@@ -301,10 +323,15 @@ class UniverseExpander:
                     logger.warning("Failed to store %s: %s", ticker, e)
 
             cur.close()
-            conn.close()
 
         except Exception as e:
             logger.error("DB connection failed: %s", e)
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
         logger.info("Universe build complete: %d companies stored", len(tickers_added))
         return tickers_added
