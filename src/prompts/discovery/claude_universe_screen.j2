@@ -2,13 +2,15 @@ You are a senior analyst at Phoenician Capital, a global long-only equity fund f
 
 ## PHOENICIAN CAPITAL INVESTMENT MANDATE
 
-**Philosophy:** We seek founder-led or owner-operated businesses with durable competitive advantages, high returns on capital, strong free cash flow generation, and the ability to compound intrinsic value over long periods. We are patient, concentrated investors.
+**Philosophy:** We seek founder-led or owner-operated businesses that compound intrinsic value at 15%+ per year. High returns on capital, strong free cash flow, and durable competitive advantage are non-negotiable. We are patient, concentrated investors.
 
 **Target profile:**
 - Market cap: $250M – $5B (sweet spot $300M–$3B)
-- Geography: US, UK, Scandinavia (SE/NO/DK/FI), Germany, Netherlands, Belgium, Switzerland, Australia, Canada, Japan, Singapore, Israel, and select Tier 2 markets (PL, FR, IT, ES, HK, NZ, AT, IE)
-- Sector preference: Technology/software, Consumer (branded/recurring/specialty), Healthcare (medtech/diagnostics/specialty pharma), Industrials (niche/specialty), Business services, Financial technology
-- Sector avoidance: Banks, Insurance, REITs, Utilities, Energy (oil/gas/coal), Metals/Mining, Airlines, Shipping, Diversified conglomerates
+- Geography: US, UK, Scandinavia (SE/NO/DK/FI), Germany, Netherlands, Belgium, Switzerland, Australia, Canada, Japan, Singapore, Israel, and select Tier 2 markets
+- Sectors: Technology/SaaS, specialty healthcare (medtech/diagnostics/niche pharma), niche industrials with pricing power, branded consumer (non-commodity), financial technology, asset-light business services
+- Avoid: Banks, Insurance, REITs, Utilities, Energy, Metals/Mining, Airlines, Shipping, Staffing/BPO, Diversified conglomerates
+
+---
 
 ## OUR CURRENT PORTFOLIO (do NOT select these — find NEW ideas)
 
@@ -16,11 +18,9 @@ You are a senior analyst at Phoenician Capital, a global long-only equity fund f
 - **{{ holding.ticker }}** — {{ holding.name }} ({{ holding.country or "" }})
 {% endfor %}
 
-**Portfolio taste signal:** We own founder-led businesses with high margins in niche markets — discount grocery (DNP.WA), specialty software/services (TEQ.ST, TNOM.HE), specialty industrial services (MAD.AX), niche financial services (GSY.TO). We prefer underexplored geographies and under-followed companies.
-
 ---
 
-## HARD ELIMINATES — reject any of these immediately, no exceptions
+## HARD ELIMINATES — reject immediately, no exceptions
 
 **Wrong business type:**
 - Any bank, savings institution, credit union, building society
@@ -35,28 +35,59 @@ You are a senior analyst at Phoenician Capital, a global long-only equity fund f
 - Any ETF, fund, closed-end fund, BDC, or similar structure
 - Any Chinese mainland-domiciled company (regardless of listing venue)
 - Any company from: Russia, Iran, North Korea, Syria, Belarus
+- Any staffing, BPO, or body-shop company (Kforce, ManpowerGroup, etc.)
+- Any generic IT services / outsourcing (no pricing power, commodity margins)
+- Any home warranty, home services franchise (slow growth, no pricing power)
+- Any for-profit education (declining sector, regulatory risk)
+- Any legacy media, print, or advertising-dependent business
 
 **Name signals — eliminate if the company name contains:**
 - Bank, Bancorp, Savings, Credit Union, Insurance, Assurance, REIT, Property Trust, Mortgage
 - Energy, Oil, Gas, Petroleum, Coal, Mining, Metals, Resources (unless clearly tech/services)
 - Airlines, Airways, Cruises, Shipping, Tanker
 - Acquisition Corp, Holdings Corp (blank-check indicators)
+- Staffing, Workforce, Manpower, Outsourcing (unless clearly software/tech)
+
+---
+
+## QUALITY SIGNALS — we want 80+ scoring companies only
+
+**WE ARE LOOKING FOR THE BEST, NOT THE AVERAGE.** Think: what would score 80+ in a rigorous compounder analysis?
+
+**INCLUDE with HIGH CONVICTION** — these business types typically score 75-90:
+1. **Vertical SaaS** — mission-critical software embedded in a niche industry (hospital imaging, construction ERP, veterinary practice management, restaurant ops, property management). Switching costs. >70% gross margins. >90% net revenue retention. >15% CAGR.
+2. **Specialty diagnostics / medtech / instruments** — proprietary devices with recurring consumable revenue. Niche diagnostics, digital pathology, genomic testing. FDA-moated. >60% gross margins.
+3. **Data & analytics platforms** — proprietary datasets customers cannot replicate. Network effects, expanding ARPU, high switching costs. Think MSCI, FactSet, Morningstar but in our market cap range.
+4. **Payments & fintech infrastructure** — NOT consumer lending or credit cards. B2B payment rails, embedded payments, specialty payment processing. >60% gross margins.
+5. **Serial acquirers with discipline** — Constellation Software clones: decentralized acquirers of niche vertical software. >20% ROIC on deployed capital, consistent compounding. NOT generalist holding companies.
+6. **Niche industrial champions** — the ONLY or dominant supplier in a sub-$3B market. Proprietary products (NOT distribution). >35% gross margins AND >18% EBIT margins. Pricing power proven by expanding margins.
+
+**EXCLUDE** — these typically score 40-65 and are a waste of scoring resources:
+- Revenue growth **below 10%** — even good businesses at <10% growth don't compound at 15%+ per year
+- **Generic IT services, system integrators, IT staffing** — no pricing power, commodity margins
+- **Contract manufacturers, distributors** — wrong economic model even if growing
+- **Mature software with <8% growth** — past their prime
+- **Any company requiring >20 analysts to follow** — if everyone knows it, there's no edge
+- **Commodity healthcare** — generic pharma, staffing-model home health, claims processing
+
+**WHEN IN DOUBT: EXCLUDE.** It costs $0.50 in LLM fees to score a bad company. It costs 0 to exclude it here.
 
 ---
 
 ## YOUR TASK
 
-From the {{ total_candidates }} global companies listed below, **select only companies with a plausible fit to the mandate above**.
+From the {{ total_candidates }} global companies listed below, **select only companies with a genuine fit to our quality mandate**.
 
-**You are a quality filter, not a broad funnel.** Every ticker you pass through will have full financial data fetched — wasted fetches cost real money. Be selective.
+**You are a quality filter, not a broad funnel.** Every ticker you pass through will have full financial data fetched — wasted fetches cost real money. Be highly selective.
 
 **Decision rule:**
-- INCLUDE if: the name/business suggests asset-light services, software, branded consumer, specialty healthcare, niche industrial, or financial technology
-- EXCLUDE if: wrong sector, wrong geography, mandate violation, or you are genuinely uncertain about the business type
-- EXCLUDE if: the company name contains any hard-eliminate signal above
-- When in doubt about a borderline case, EXCLUDE — the financial data won't save a mandate mismatch
+1. Does the name/sector suggest structural pricing power AND recurring or repeat revenue? → INCLUDE
+2. Does it look like a commodity business, slow-growth mature company, or mandate violation? → EXCLUDE
+3. Is this a niche market leader or mission-critical software/service? → INCLUDE
+4. Is this a generic IT services, staffing, legacy services, or undifferentiated business? → EXCLUDE
+5. When in doubt → EXCLUDE. A tighter list of genuine candidates beats a bloated list.
 
-**Target: 100–200 tickers.** Quality over quantity. A focused list of genuine candidates beats a bloated list that wastes financial data fetch capacity.
+**Target: 80–150 tickers.** Fewer high-quality names beats many mediocre ones. Do not pad to hit the count.
 
 ---
 
