@@ -15,7 +15,6 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.pool import NullPool
 
 from src.config.settings import settings
 
@@ -25,19 +24,26 @@ router = APIRouter(prefix="/api/v1", tags=["api"])
 
 
 # ── DB session factory ─────────────────────────────────────────────────────────
+# Single shared engine with connection pool — reused across all requests
+_engine = create_async_engine(
+    settings.db.dsn,
+    echo=False,
+    pool_size=10,
+    max_overflow=20,
+    pool_pre_ping=True,        # verify connections before use
+    pool_recycle=1800,         # recycle connections every 30 min
+)
+_session_factory = async_sessionmaker(_engine, class_=AsyncSession, expire_on_commit=False)
+
+
 def _make_session():
-    engine = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    return engine, factory
+    """Return the shared engine and session factory."""
+    return _engine, _session_factory
 
 
 async def _get_session():
-    engine, factory = _make_session()
-    try:
-        async with factory() as session:
-            yield session, engine
-    finally:
-        await engine.dispose()
+    async with _session_factory() as session:
+        yield session, _engine
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -59,9 +65,16 @@ def _fmt_cap(v) -> str:
 _SCREENING_JOB: dict = {}
 _SCREENING_LOCK = threading.Lock()
 
+# ── Global IR scan job state ───────────────────────────────────────────────────
+_IR_SCAN_JOB: dict = {}
+_IR_SCAN_LOCK = threading.Lock()
+
 # ── SSE event streaming ────────────────────────────────────────────────────────
 import queue as _queue
 _SCREENING_EVENTS: _queue.Queue = _queue.Queue()
+# Async subscribers: each SSE connection gets its own asyncio.Queue
+_SSE_SUBSCRIBERS: list = []
+_SSE_LOCK = threading.Lock()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -214,8 +227,6 @@ async def get_recommendations(limit: int = Query(100, le=1000)):
                     "portfolio_comparison": r.portfolio_comparison,
                 })
             return rows
-    finally:
-        await engine.dispose()
 
 
 class FeedbackBody(BaseModel):
@@ -272,8 +283,6 @@ async def submit_feedback(ticker: str, body: FeedbackBody):
 
             await session.commit()
             return {"ok": True, "ticker": ticker, "action": body.action}
-    finally:
-        await engine.dispose()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -287,19 +296,26 @@ class RunScreeningBody(BaseModel):
 @router.get("/screening/events")
 async def screening_events():
     """Server-Sent Events stream for real-time screening progress."""
+    import json as _json
+    loop = asyncio.get_event_loop()
+    q: asyncio.Queue = asyncio.Queue()
+    with _SSE_LOCK:
+        _SSE_SUBSCRIBERS.append((loop, q))
+
     async def event_generator():
-        while True:
-            try:
-                # Non-blocking get with timeout
-                event = _SCREENING_EVENTS.get(timeout=0.5)
-                import json as _json
-                yield f"data: {_json.dumps(event)}\n\n"
-            except _queue.Empty:
-                # Send heartbeat to keep connection alive
-                yield ": heartbeat\n\n"
-            except Exception as e:
-                logger.error(f"SSE error: {e}")
-                break
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=20.0)
+                    yield f"data: {_json.dumps(event)}\n\n"
+                except asyncio.TimeoutError:
+                    yield ": heartbeat\n\n"
+        finally:
+            with _SSE_LOCK:
+                try:
+                    _SSE_SUBSCRIBERS.remove((loop, q))
+                except ValueError:
+                    pass
 
     return StreamingResponse(
         event_generator(),
@@ -324,6 +340,16 @@ def _emit_event(event_type: str, data: dict | None = None, **kwargs):
         _SCREENING_EVENTS.put_nowait(payload)
     except _queue.Full:
         pass  # Drop event if queue is full
+    # Push to all async SSE subscribers (non-blocking, thread-safe)
+    with _SSE_LOCK:
+        dead = []
+        for loop, q in _SSE_SUBSCRIBERS:
+            try:
+                loop.call_soon_threadsafe(q.put_nowait, payload)
+            except Exception:
+                dead.append((loop, q))
+        for d in dead:
+            _SSE_SUBSCRIBERS.remove(d)
 
 
 @router.post("/screening/run")
@@ -360,6 +386,7 @@ async def start_screening(body: RunScreeningBody):
                         tickers = await exp.expand_via_screener(max_companies=body.max_companies)
                     except Exception as e:
                         logger.warning(f"Discovery failed ({e}), falling back to portfolio companies")
+                        await sess.rollback()
                         result = await sess.execute(text("SELECT ticker FROM portfolio_holdings WHERE is_active = true LIMIT :limit"), {"limit": body.max_companies})
                         tickers = [row[0] for row in result.fetchall()]
             finally:
@@ -376,14 +403,27 @@ async def start_screening(body: RunScreeningBody):
             from src.orchestration.pipelines.scoring_pipeline import ScoringPipeline
             from src.shared.scoring_state import ScreeningProgress
 
+            _STEP_LABELS = {
+                "init":      "Initialising",
+                "selection": "Selection Team Pre-Filtering",
+                "scoring":   "Scoring with AI Analyst",
+                "ranking":   "Ranking Results",
+                "complete":  "Complete",
+            }
+
             def _on_progress(progress: ScreeningProgress):
                 """Update job state and emit SSE event for progress updates."""
-                _SCREENING_JOB.update({
+                update: dict = {
                     "step": progress.step,
                     "current_ticker": progress.current_ticker,
+                    "current_agent": progress.current_agent,
                     "companies_scored": progress.companies_scored,
                     "failed_companies": progress.failed_companies,
-                })
+                }
+                # Keep step_label in sync
+                if progress.step in _STEP_LABELS:
+                    update["step_label"] = _STEP_LABELS[progress.step]
+                _SCREENING_JOB.update(update)
                 _emit_event("screening_progress", **progress.dict())
 
             eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
@@ -424,6 +464,14 @@ async def start_screening(body: RunScreeningBody):
         try:
             loop.run_until_complete(_bg_async())
         finally:
+            # Gracefully cancel remaining tasks before closing
+            try:
+                pending = asyncio.all_tasks(loop)
+                if pending:
+                    loop.run_until_complete(asyncio.gather(*pending, return_exceptions=True))
+            except Exception:
+                pass
+            loop.run_until_complete(loop.shutdown_asyncgens())
             loop.close()
 
     threading.Thread(target=_bg, daemon=False, name="api_screening_bg").start()
@@ -629,8 +677,6 @@ async def get_portfolio():
             except Exception as e:
                 logger.error(f"Portfolio endpoint error: {e}", exc_info=True)
                 raise HTTPException(500, f"Failed to fetch portfolio: {str(e)}")
-    finally:
-        await engine.dispose()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -639,10 +685,20 @@ async def get_portfolio():
 
 @router.post("/portfolio/scan-ir")
 async def scan_ir():
-    """Run IR monitor scan + news fetch across all active portfolio holdings."""
-    engine, factory = _make_session()
-    try:
-        async with factory() as session:
+    """Start an IR monitor scan + news fetch in the background. Returns immediately."""
+    with _IR_SCAN_LOCK:
+        if _IR_SCAN_JOB.get("running"):
+            return {"ok": False, "message": "A scan is already in progress"}
+        _IR_SCAN_JOB.clear()
+        _IR_SCAN_JOB.update({
+            "running": True, "done": False, "error": None,
+            "step": "Scanning IR calendars…",
+            "new_ir_events": 0, "news_articles": 0,
+            "t0": time.time(),
+        })
+
+    async def _bg_async():
+        try:
             from src.db.repositories.portfolio_repo import PortfolioRepository
             from src.db.models.document import Document
             from src.db.repositories.document_repo import DocumentRepository
@@ -650,79 +706,107 @@ async def scan_ir():
             from src.shared.llm.client_factory import complete
             from src.prompts import load_prompt
             from src.ingestion.sources.news.client import NewsClient
-            import datetime as _dt
 
-            # 1. IR events
-            worker = IRMonitorWorker()
-            new_events = await worker.run(session)
+            eng = create_async_engine(settings.db.dsn, echo=False, poolclass=NullPool)
+            fac = async_sessionmaker(eng, class_=AsyncSession, expire_on_commit=False)
+            try:
+                async with fac() as session:
+                    # 1. IR events
+                    worker = IRMonitorWorker()
+                    new_events = await worker.run(session)
+                    _IR_SCAN_JOB.update({
+                        "new_ir_events": len(new_events),
+                        "step": "Fetching news…",
+                    })
 
-            # 2. News — fetch for all holdings and store, replacing stale articles
-            portfolio_repo = PortfolioRepository(session)
-            doc_repo = DocumentRepository(session)
-            holdings = await portfolio_repo.get_active()
-            news_client = NewsClient()
-            system_prompt = load_prompt("ingestion/news_search_system.j2")
+                    # 2. News
+                    portfolio_repo = PortfolioRepository(session)
+                    holdings = await portfolio_repo.get_active()
+                    news_client = NewsClient()
+                    system_prompt = load_prompt("ingestion/news_search_system.j2")
 
-            async def _fetch_news(holding):
-                try:
-                    prompt = load_prompt(
-                        "ingestion/news_search.j2",
-                        query=f"{holding.ticker} {holding.name or ''} investor news earnings",
-                        tickers=[holding.ticker],
-                        date_from=None,
-                        limit=5,
-                    )
-                    raw = await complete(prompt, model="sonar", system=system_prompt,
-                                        max_tokens=2000, temperature=0.1)
-                    articles = news_client._parse_articles(raw)[:5]
+                    async def _fetch_news(holding):
+                        try:
+                            prompt = load_prompt(
+                                "ingestion/news_search.j2",
+                                query=f"{holding.ticker} {holding.name or ''} investor news earnings",
+                                tickers=[holding.ticker],
+                                date_from=None,
+                                limit=5,
+                            )
+                            raw = await complete(prompt, model="sonar", system=system_prompt,
+                                                max_tokens=2000, temperature=0.1)
+                            articles = news_client._parse_articles(raw)[:5]
 
-                    # Delete existing news articles for this ticker (refresh)
-                    from sqlalchemy import delete as _del
-                    from src.db.models.document import Document as _Doc
-                    await session.execute(
-                        _del(_Doc).where(
-                            _Doc.ticker == holding.ticker,
-                            _Doc.doc_type == "news_article",
-                        )
-                    )
+                            from sqlalchemy import delete as _del
+                            from src.db.models.document import Document as _Doc
+                            await session.execute(
+                                _del(_Doc).where(
+                                    _Doc.ticker == holding.ticker,
+                                    _Doc.doc_type == "news_article",
+                                )
+                            )
+                            for article in articles:
+                                if not article.get("title"):
+                                    continue
+                                doc = Document(
+                                    ticker=holding.ticker,
+                                    doc_type="news_article",
+                                    source="perplexity",
+                                    source_url=article.get("url"),
+                                    title=article["title"][:500],
+                                    raw_text=article.get("snippet", "")[:1000],
+                                    published_at=None,
+                                    meta={"published_at": article.get("published_at")},
+                                )
+                                session.add(doc)
+                            await session.flush()
+                            return len(articles)
+                        except Exception as e:
+                            logger.warning("News fetch failed for %s: %s", holding.ticker, e)
+                            return 0
 
-                    for article in articles:
-                        if not article.get("title"):
-                            continue
-                        doc = Document(
-                            ticker=holding.ticker,
-                            doc_type="news_article",
-                            source="perplexity",
-                            source_url=article.get("url"),
-                            title=article["title"][:500],
-                            raw_text=article.get("snippet", "")[:1000],
-                            published_at=None,
-                            meta={"published_at": article.get("published_at")},
-                        )
-                        session.add(doc)
-                    await session.flush()
-                    return len(articles)
-                except Exception as e:
-                    logger.warning("News fetch failed for %s: %s", holding.ticker, e)
-                    return 0
+                    sem = asyncio.Semaphore(5)
+                    async def _guarded(h):
+                        async with sem:
+                            return await _fetch_news(h)
 
-            # Run news fetches concurrently (max 5 at a time)
-            sem = asyncio.Semaphore(5)
-            async def _guarded(h):
-                async with sem:
-                    return await _fetch_news(h)
+                    news_counts = await asyncio.gather(*[_guarded(h) for h in holdings], return_exceptions=True)
+                    total_news = sum(n for n in news_counts if isinstance(n, int))
+                    await session.commit()
 
-            news_counts = await asyncio.gather(*[_guarded(h) for h in holdings], return_exceptions=True)
-            total_news = sum(n for n in news_counts if isinstance(n, int))
+            finally:
+                await eng.dispose()
 
-            await session.commit()
-            return {
-                "ok": True,
-                "new_ir_events": len(new_events),
+            _IR_SCAN_JOB.update({
+                "running": False, "done": True,
                 "news_articles": total_news,
-            }
-    finally:
-        await engine.dispose()
+                "step": "Done",
+                "elapsed": round(time.time() - _IR_SCAN_JOB["t0"]),
+            })
+        except Exception as e:
+            logger.exception("Background IR scan error: %s", e)
+            _IR_SCAN_JOB.update({"error": str(e), "done": True, "running": False})
+
+    def _bg():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(_bg_async())
+        finally:
+            loop.close()
+
+    threading.Thread(target=_bg, daemon=False, name="api_ir_scan_bg").start()
+    return {"ok": True, "message": "IR scan started"}
+
+
+@router.get("/portfolio/scan-ir/status")
+async def scan_ir_status():
+    """Poll the current IR scan status."""
+    job = dict(_IR_SCAN_JOB)
+    if job.get("t0") and not job.get("done"):
+        job["elapsed"] = round(time.time() - job["t0"])
+    return job
 
 
 @router.get("/portfolio/{ticker}/signals")
@@ -758,8 +842,6 @@ async def get_ticker_signals(ticker: str):
             ]
 
             return {"ticker": ticker, "ir_events": ir_events, "news": news}
-    finally:
-        await engine.dispose()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -791,8 +873,6 @@ async def get_insiders(days: int = Query(30, le=180)):
                 "cluster_buys": [_ser(p) for p in cluster],
                 "recent":       [_ser(p) for p in recent],
             }
-    finally:
-        await engine.dispose()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -860,8 +940,6 @@ async def get_stats():
                     "avg_fit_score":     0,
                     "recent_decisions":  0,
                 }
-    finally:
-        await engine.dispose()
 
 
 @router.post("/screening/reset-db")
