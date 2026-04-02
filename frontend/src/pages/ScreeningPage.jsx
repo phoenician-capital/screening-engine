@@ -206,7 +206,7 @@ export default function ScreeningPage() {
       </div>
 
       {/* View toggle — only show during/after run */}
-      {(isRunning || isDone) && (
+      {(starting || isRunning || isDone) && (
         <div className="flex gap-2 mb-6">
           <button
             onClick={() => setView('progress')}
@@ -234,7 +234,7 @@ export default function ScreeningPage() {
       )}
 
       {/* Content */}
-      {isRunning || isDone ? (
+      {(starting || isRunning || isDone) ? (
         <motion.div
           key={view}
           initial={{ opacity: 0, y: 10 }}
@@ -246,7 +246,7 @@ export default function ScreeningPage() {
           )}
 
           {view === 'agents' && (
-            <AgentVisualization events={events} />
+            <AgentVisualization events={events} status={job} />
           )}
         </motion.div>
       ) : null}
