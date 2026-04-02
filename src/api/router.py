@@ -84,9 +84,7 @@ _SSE_LOCK = threading.Lock()
 @router.get("/recommendations")
 async def get_recommendations(limit: int = Query(100, le=1000)):
     """Top-ranked recommendations with company and metric data — portfolio holdings excluded."""
-    engine, factory = _make_session()
-    try:
-        async with factory() as session:
+    async with _session_factory() as session:
             from src.db.repositories.recommendation_repo import RecommendationRepository
             from src.db.repositories.company_repo import CompanyRepository
             from src.db.repositories.metric_repo import MetricRepository
@@ -243,9 +241,7 @@ class FeedbackBody(BaseModel):
 
 @router.post("/recommendations/{ticker}/feedback")
 async def submit_feedback(ticker: str, body: FeedbackBody):
-    engine, factory = _make_session()
-    try:
-        async with factory() as session:
+    async with _session_factory() as session:
             from src.db.models.feedback import Feedback
             from src.db.repositories.recommendation_repo import RecommendationRepository
             from src.orchestration.pipelines.bidirectional_feedback_pipeline import (
@@ -587,9 +583,7 @@ async def screening_status():
 
 @router.get("/portfolio")
 async def get_portfolio():
-    engine, factory = _make_session()
-    try:
-        async with factory() as session:
+    async with _session_factory() as session:
             try:
                 from src.db.repositories.portfolio_repo import PortfolioRepository
                 from src.db.repositories import MetricRepository, RecommendationRepository
@@ -812,9 +806,7 @@ async def scan_ir_status():
 @router.get("/portfolio/{ticker}/signals")
 async def get_ticker_signals(ticker: str):
     """Return IR events + news for a single portfolio holding — both read from DB."""
-    engine, factory = _make_session()
-    try:
-        async with factory() as session:
+    async with _session_factory() as session:
             from src.db.repositories.document_repo import DocumentRepository
             doc_repo = DocumentRepository(session)
 
@@ -850,9 +842,7 @@ async def get_ticker_signals(ticker: str):
 
 @router.get("/insiders")
 async def get_insiders(days: int = Query(30, le=180)):
-    engine, factory = _make_session()
-    try:
-        async with factory() as session:
+    async with _session_factory() as session:
             from src.db.repositories.insider_repo import InsiderRepository
             repo    = InsiderRepository(session)
             cluster = await repo.get_cluster_buys(days=days)
@@ -905,9 +895,7 @@ async def save_settings(body: SaveSettingsBody):
 
 @router.get("/stats")
 async def get_stats():
-    engine, factory = _make_session()
-    try:
-        async with factory() as session:
+    async with _session_factory() as session:
             from src.db.repositories.recommendation_repo import RecommendationRepository
             from src.db.repositories.feedback_repo import FeedbackRepository
 
