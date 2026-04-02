@@ -3,12 +3,12 @@ FROM node:20-alpine AS frontend-builder
 
 WORKDIR /app/frontend
 COPY frontend/package*.json ./
-RUN npm install
+RUN npm install && chmod +x node_modules/.bin/vite node_modules/.bin/esbuild
 COPY frontend/ .
-RUN npx --yes vite build
+RUN node node_modules/vite/bin/vite.js build
 
 # Stage 2: Build backend with frontend
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
