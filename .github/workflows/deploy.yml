@@ -1,16 +1,95 @@
-name: Auto-Deploy to EC2
+name: Deploy to ECS
 
 on:
   push:
     branches: [main]
 
+env:
+  AWS_REGION: eu-north-1
+  ECR_REPOSITORY: phoenician-prod
+  ECS_CLUSTER: phoenician-prod-cluster
+  ECS_SERVICE: phoenician-prod-service
+
 jobs:
   deploy:
+    name: Build, Push & Deploy
     runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write  # required for OIDC
+      contents: read
+
     steps:
-      - name: Trigger Lambda Deployment
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ── AWS Credentials (OIDC — no long-lived keys) ─────────────────────────
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # ── ECR Login ───────────────────────────────────────────────────────────
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      # ── Build & Push ────────────────────────────────────────────────────────
+      - name: Build, tag, and push image to ECR
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
         run: |
-          curl -X POST https://jcx8vpljvk.execute-api.eu-north-1.amazonaws.com/prod/deploy \
-            -H "Content-Type: application/json" \
-            -d '{"ref":"refs/heads/main"}'
-          echo "✅ Deploy triggered via AWS Lambda"
+          IMAGE_URI="$ECR_REGISTRY/$ECR_REPOSITORY"
+
+          # Build multi-stage image (frontend + backend in one)
+          docker build \
+            --tag "$IMAGE_URI:$IMAGE_TAG" \
+            --tag "$IMAGE_URI:latest" \
+            --cache-from "$IMAGE_URI:latest" \
+            .
+
+          docker push "$IMAGE_URI:$IMAGE_TAG"
+          docker push "$IMAGE_URI:latest"
+
+          echo "image=$IMAGE_URI:$IMAGE_TAG" >> "$GITHUB_OUTPUT"
+
+      # ── Force ECS Redeploy ──────────────────────────────────────────────────
+      - name: Deploy to ECS (force new deployment)
+        run: |
+          aws ecs update-service \
+            --cluster "$ECS_CLUSTER" \
+            --service "$ECS_SERVICE" \
+            --force-new-deployment \
+            --region "$AWS_REGION"
+
+      # ── Wait for Stable ─────────────────────────────────────────────────────
+      - name: Wait for ECS service to stabilize
+        run: |
+          echo "Waiting for ECS service to reach steady state..."
+          aws ecs wait services-stable \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --region "$AWS_REGION" && echo "ECS service is stable." \
+            || echo "::warning::ECS stabilization timed out — service may still be rolling. Check ECS console."
+
+      # ── Summary ─────────────────────────────────────────────────────────────
+      - name: Deployment summary
+        run: |
+          echo "### Deployment Complete" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Image:** ${{ steps.build-image.outputs.image }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Cluster:** $ECS_CLUSTER" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Service:** $ECS_SERVICE" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Commit:** ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+
+          # Print running task info
+          aws ecs describe-services \
+            --cluster "$ECS_CLUSTER" \
+            --services "$ECS_SERVICE" \
+            --region "$AWS_REGION" \
+            --query 'services[0].{Status:status,Running:runningCount,Desired:desiredCount,Deployment:deployments[0].status}' \
+            --output table
