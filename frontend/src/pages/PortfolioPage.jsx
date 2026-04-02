@@ -179,7 +179,7 @@ function HoldingCard({ h, i }) {
 }
 
 export default function PortfolioPage() {
-  const { data: portfolio, loading: loadP } = useApi(api.portfolio)
+  const { data: portfolio, loading: loadP, error: portfolioError, reload: reloadPortfolio } = useApi(api.portfolio)
 
   const [scanning, setScanning] = useState(false)
   const [scanResult, setScanResult] = useState(null)
@@ -192,8 +192,17 @@ export default function PortfolioPage() {
     setScanResult(null)
     setScanError(null)
     try {
-      const res = await api.scanIR()
-      setScanResult(res)
+      await api.scanIR()
+      // Poll until done
+      while (true) {
+        await new Promise(r => setTimeout(r, 3000))
+        const status = await api.scanIRStatus()
+        if (status.done) {
+          if (status.error) throw new Error(status.error)
+          setScanResult({ new_ir_events: status.new_ir_events, news_articles: status.news_articles })
+          break
+        }
+      }
     } catch (e) {
       setScanError(e.message)
     } finally {
@@ -246,6 +255,17 @@ export default function PortfolioPage() {
       {loadP ? (
         <div className="space-y-3">
           {[...Array(6)].map((_, i) => <Skeleton key={i} className="h-16 rounded-sm" />)}
+        </div>
+      ) : portfolioError ? (
+        <div className="flex flex-col items-center gap-3 py-12 text-center">
+          <AlertCircle size={20} className="text-red-400" />
+          <p className="text-sm text-stone-500">Failed to load holdings</p>
+          <button
+            onClick={reloadPortfolio}
+            className="px-4 py-2 text-sm font-medium bg-stone-900 text-white rounded-xs hover:bg-stone-800 transition"
+          >
+            Retry
+          </button>
         </div>
       ) : (
         <div className="space-y-2">
