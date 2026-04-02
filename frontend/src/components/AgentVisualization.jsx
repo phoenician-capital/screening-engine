@@ -1,291 +1,591 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import clsx from 'clsx'
 
-/**
- * Beautiful real-time visualization of the multi-agent screening system.
- * Shows Selection Team (pre-filter) → Scoring Team (analyze) flow.
- */
-export default function AgentVisualization({ events = [] }) {
-  const [selectedAgent, setSelectedAgent] = useState(null)
-  const [agentMetrics, setAgentMetrics] = useState({})
-  const [activePhase, setActivePhase] = useState('discovery') // discovery, selection, scoring, complete
+// ── Selection agent definitions ──────────────────────────────────────────────
 
-  // Parse events to update metrics
+const SELECTION_AGENTS = [
+  {
+    id: 'filter',
+    name: 'Filter Agent',
+    icon: '🔧',
+    color: 'emerald',
+    role: 'Hard Metric Gates',
+    checks: ['Gross margin ≥ 30%', 'ROIC ≥ 8%', 'Net Debt/EBITDA ≤ 4×', 'Revenue growth ≥ 3%'],
+    rejects: 'Hard-rejects if any threshold unmet',
+    passes: 'Gross margin, ROIC, leverage, growth all look clean',
+  },
+  {
+    id: 'business_model',
+    name: 'Business Model',
+    icon: '🏢',
+    color: 'amber',
+    role: 'Clarity Check',
+    checks: ['Is the business clearly understandable?', 'Single-focus vs conglomerate', 'Recurring revenue model'],
+    rejects: 'Business model too complex, diversified, or unclear',
+    passes: 'Clean, single-focus business with clear unit economics',
+  },
+  {
+    id: 'founder',
+    name: 'Founder Agent',
+    icon: '👔',
+    color: 'blue',
+    role: 'Skin-in-Game Check',
+    checks: ['Founder still operating?', 'Insider ownership %', 'Recent insider buys (90-day window)'],
+    rejects: 'No insider ownership or alignment evidence',
+    passes: 'Founder/insiders have meaningful ownership or recent buys',
+  },
+  {
+    id: 'growth',
+    name: 'Growth Agent',
+    icon: '📈',
+    color: 'purple',
+    role: 'Growth Quality',
+    checks: ['Organic revenue CAGR', 'FCF growth trajectory', 'M&A-adjusted growth rate'],
+    rejects: 'Growth driven by acquisitions or declining',
+    passes: 'Organic, compounding growth with FCF support',
+  },
+  {
+    id: 'red_flag',
+    name: 'Red Flag Agent',
+    icon: '🚩',
+    color: 'red',
+    role: 'Pattern Detection',
+    checks: ['Buyback-to-FCF ratio', 'SBC dilution rate', 'Learned rejection patterns from past runs'],
+    rejects: 'Matches a known bad pattern (excessive SBC, buyback games, etc.)',
+    passes: 'No red flag patterns detected',
+  },
+]
+
+const AGENT_ORDER = SELECTION_AGENTS.map(a => a.id)
+
+const COLOR = {
+  emerald: { ring: 'ring-emerald-400', bg: 'bg-emerald-50', border: 'border-emerald-300', text: 'text-emerald-700', dot: 'bg-emerald-400', glow: 'shadow-emerald-200' },
+  amber:   { ring: 'ring-amber-400',   bg: 'bg-amber-50',   border: 'border-amber-300',   text: 'text-amber-700',   dot: 'bg-amber-400',   glow: 'shadow-amber-200'   },
+  blue:    { ring: 'ring-blue-400',    bg: 'bg-blue-50',    border: 'border-blue-300',    text: 'text-blue-700',    dot: 'bg-blue-400',    glow: 'shadow-blue-200'    },
+  purple:  { ring: 'ring-purple-400',  bg: 'bg-purple-50',  border: 'border-purple-300',  text: 'text-purple-700',  dot: 'bg-purple-400',  glow: 'shadow-purple-200'  },
+  red:     { ring: 'ring-red-400',     bg: 'bg-red-50',     border: 'border-red-300',     text: 'text-red-700',     dot: 'bg-red-400',     glow: 'shadow-red-200'     },
+}
+
+// ── Main export ───────────────────────────────────────────────────────────────
+
+/**
+ * Real-time multi-agent screening visualization.
+ * Accepts `status` (polled) + `events` (SSE) for live updates.
+ */
+export default function AgentVisualization({ events = [], status = null }) {
+  const [activePhase, setActivePhase] = useState('discovery')
+  const [agentMetrics, setAgentMetrics] = useState({})
+
+  // Derive phase from status (polled) + events (SSE)
+  useEffect(() => {
+    if (status?.step === 'selection') {
+      setActivePhase('selection')
+    } else if (status?.step === 'scoring') {
+      // After selection completes, scoring starts
+      setActivePhase('scoring')
+    } else if (status?.done) {
+      setActivePhase('complete')
+    }
+  }, [status?.step, status?.done])
+
   useEffect(() => {
     if (events.length === 0) return
-
-    const lastEvent = events[events.length - 1]
-
-    if (lastEvent.type === 'screening_started') {
-      setActivePhase('discovery')
-    } else if (lastEvent.type === 'discovery_complete') {
+    const last = events[events.length - 1]
+    if (last.type === 'screening_started') setActivePhase('discovery')
+    else if (last.type === 'discovery_complete') {
       setActivePhase('selection')
-      setAgentMetrics(m => ({
-        ...m,
-        discovery: { complete: true, count: lastEvent.tickers_found }
-      }))
-    } else if (lastEvent.type === 'screening_complete') {
+      setAgentMetrics(m => ({ ...m, discovery: { complete: true, count: last.tickers_found } }))
+    } else if (last.type === 'screening_progress' && last.step === 'scoring') {
       setActivePhase('scoring')
-      setAgentMetrics(m => ({
-        ...m,
-        scoring: { complete: true, count: lastEvent.scored }
-      }))
-    } else if (lastEvent.type === 'screening_done') {
+      setAgentMetrics(m => ({ ...m, scoring: { complete: false, count: last.companies_scored } }))
+    } else if (last.type === 'screening_complete') {
+      setActivePhase('complete')
+      setAgentMetrics(m => ({ ...m, scoring: { complete: true, count: last.scored } }))
+    } else if (last.type === 'screening_done') {
       setActivePhase('complete')
     }
   }, [events])
 
+  const discoveryCount = agentMetrics.discovery?.count ?? status?.tickers_found ?? 0
+  const isSelectionPhase = activePhase === 'selection' || status?.step === 'selection'
+  const isScoringPhase   = activePhase === 'scoring'   || status?.step === 'scoring'
+
   return (
-    <div className="w-full space-y-8">
-      {/* Phase header */}
-      <div className="text-center mb-8">
-        <div className="section-label mb-2">Multi-Agent Screening System</div>
-        <h3 className="font-display text-2xl font-light text-stone-800 mb-2">
-          {activePhase === 'discovery' && '🔍 Discovering Universe'}
-          {activePhase === 'selection' && '⚡ Selection Team Pre-Filtering'}
-          {activePhase === 'scoring' && '🧠 Scoring Team Analyzing'}
-          {activePhase === 'complete' && '✨ Screening Complete'}
+    <div className="w-full space-y-6">
+
+      {/* ── Phase header ── */}
+      <div className="text-center">
+        <div className="section-label mb-1">Multi-Agent Screening System</div>
+        <h3 className="font-display text-xl font-light text-stone-800">
+          {activePhase === 'discovery'  && '🔍 Discovering Universe'}
+          {isSelectionPhase             && '⚡ Selection Team Pre-Filtering'}
+          {isScoringPhase               && '🧠 Scoring with AI Analyst'}
+          {activePhase === 'complete'   && '✨ Screening Complete'}
         </h3>
-        <p className="text-sm text-stone-500">
-          {activePhase === 'discovery' && 'Fetching companies from EDGAR and international sources...'}
-          {activePhase === 'selection' && 'Running 5 selection agents to pre-filter candidates...'}
-          {activePhase === 'scoring' && 'Scoring pre-filtered companies with AI Analyst...'}
-          {activePhase === 'complete' && 'All companies processed and ranked'}
-        </p>
       </div>
 
-      {/* Agent schema diagram */}
-      <div className="bg-white border border-stone-200 rounded-lg p-8 shadow-sm">
-        {/* DISCOVERY PHASE */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: activePhase === 'discovery' || activePhase === 'selection' || activePhase === 'scoring' ? 1 : 0.3 }}
-          className="mb-12"
+      <div className="bg-white border border-stone-200 rounded-lg shadow-sm overflow-hidden">
+
+        {/* ── Phase 1: Discovery ── */}
+        <PhaseRow
+          label="Phase 1 — Universe Discovery"
+          done={activePhase !== 'discovery'}
+          active={activePhase === 'discovery'}
         >
-          <AgentPhase
-            title="Phase 1: Universe Discovery"
-            agents={[
-              { id: 'edgar', name: 'EDGAR', icon: '📄', description: 'US companies', color: 'blue' },
-              { id: 'intl', name: 'International', icon: '🌍', description: 'Global companies', color: 'purple' },
-            ]}
-            output="1000 candidates"
-            active={activePhase === 'discovery'}
-            metrics={agentMetrics.discovery}
+          <div className="flex gap-3">
+            {[
+              { id: 'edgar', name: 'EDGAR', icon: '📄', color: 'blue', desc: 'US companies' },
+              { id: 'intl',  name: 'International', icon: '🌍', color: 'purple', desc: 'Global search' },
+            ].map(a => (
+              <SmallAgentBadge key={a.id} {...a} active={activePhase === 'discovery'} />
+            ))}
+            {discoveryCount > 0 && (
+              <div className="ml-auto flex items-center text-sm font-semibold text-stone-600">
+                {discoveryCount} candidates found
+              </div>
+            )}
+          </div>
+        </PhaseRow>
+
+        {/* ── Connector ── */}
+        <PhaseConnector active={isSelectionPhase || isScoringPhase || activePhase === 'complete'} />
+
+        {/* ── Phase 2: Selection (the star of the show) ── */}
+        <PhaseRow
+          label="Phase 2 — Selection Team (Pre-Filter)"
+          done={isScoringPhase || activePhase === 'complete'}
+          active={isSelectionPhase}
+        >
+          <SelectionChain
+            status={status}
+            isSelectionPhase={isSelectionPhase}
+            isScoringDone={isScoringPhase || activePhase === 'complete'}
           />
-        </motion.div>
+        </PhaseRow>
 
-        {/* Arrow */}
-        <div className="flex justify-center mb-12">
-          <motion.div
-            animate={{ scale: activePhase !== 'discovery' ? 1 : 0.8, opacity: activePhase !== 'discovery' ? 1 : 0.5 }}
-            className="h-12 relative"
-          >
-            <svg className="w-8 h-12" viewBox="0 0 32 48" fill="none">
-              <motion.path
-                d="M16 0 L16 40 M16 40 L10 34 M16 40 L22 34"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="text-stone-400"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                initial={{ pathLength: 0 }}
-                animate={{ pathLength: activePhase !== 'discovery' ? 1 : 0 }}
-                transition={{ duration: 0.8 }}
-              />
-            </svg>
-          </motion.div>
-        </div>
+        {/* ── Connector ── */}
+        <PhaseConnector active={isScoringPhase || activePhase === 'complete'} />
 
-        {/* SELECTION TEAM PHASE */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: activePhase === 'selection' || activePhase === 'scoring' ? 1 : 0.3 }}
-          className="mb-12"
+        {/* ── Phase 3: Scoring ── */}
+        <PhaseRow
+          label="Phase 3 — Scoring Team (AI Analyst)"
+          done={activePhase === 'complete'}
+          active={isScoringPhase}
         >
-          <AgentPhase
-            title="Phase 2: Selection Team (Pre-Filter)"
-            agents={[
-              { id: 'filter', name: 'Filter Agent', icon: '🔧', description: 'Hard metrics (margins, ROIC, debt)', color: 'emerald' },
-              { id: 'business', name: 'Business Model', icon: '🏢', description: 'Is the business clear?', color: 'amber' },
-              { id: 'founder', name: 'Founder Agent', icon: '👔', description: 'Founder alignment & skin in game', color: 'blue' },
-              { id: 'growth', name: 'Growth Agent', icon: '📈', description: 'Organic growth quality', color: 'purple' },
-              { id: 'redflag', name: 'Red Flag Agent', icon: '🚩', description: 'Learned patterns & buyback ratios', color: 'red' },
-            ]}
-            output="40-50 selected"
-            active={activePhase === 'selection'}
-            metrics={agentMetrics.selection}
-          />
-        </motion.div>
+          <div className="flex gap-3 flex-wrap">
+            {[
+              { id: 'analyst', name: 'AI Analyst', icon: '🧠', color: 'amber',  desc: 'Business quality + fit' },
+              { id: 'risk',    name: 'Risk Scorer', icon: '⚠️',  color: 'red',   desc: 'Leverage, moat, margins' },
+              { id: 'memo',    name: 'Memo Gen',    icon: '📝',  color: 'blue',  desc: 'Investment thesis' },
+            ].map(a => (
+              <SmallAgentBadge key={a.id} {...a} active={isScoringPhase} done={activePhase === 'complete'} />
+            ))}
+            {(isScoringPhase || activePhase === 'complete') && status?.companies_scored > 0 && (
+              <div className="ml-auto flex items-center text-sm font-semibold text-stone-600">
+                {status.companies_scored} scored
+              </div>
+            )}
+          </div>
+        </PhaseRow>
 
-        {/* Arrow */}
-        <div className="flex justify-center mb-12">
-          <motion.div
-            animate={{ scale: activePhase !== 'selection' && activePhase !== 'discovery' ? 1 : 0.8, opacity: activePhase !== 'selection' && activePhase !== 'discovery' ? 1 : 0.5 }}
-            className="h-12 relative"
-          >
-            <svg className="w-8 h-12" viewBox="0 0 32 48" fill="none">
-              <motion.path
-                d="M16 0 L16 40 M16 40 L10 34 M16 40 L22 34"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="text-stone-400"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                initial={{ pathLength: 0 }}
-                animate={{ pathLength: activePhase !== 'selection' && activePhase !== 'discovery' ? 1 : 0 }}
-                transition={{ duration: 0.8 }}
-              />
-            </svg>
-          </motion.div>
-        </div>
-
-        {/* SCORING TEAM PHASE */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: activePhase === 'scoring' || activePhase === 'complete' ? 1 : 0.3 }}
-          className="mb-12"
-        >
-          <AgentPhase
-            title="Phase 3: Scoring Team (Analyze)"
-            agents={[
-              { id: 'analyst', name: 'AI Analyst', icon: '🧠', description: 'Business quality, unit economics, capital returns, growth, balance sheet, fit', color: 'gold' },
-              { id: 'risk', name: 'Risk Scorer', icon: '⚠️', description: 'Leverage, competitive position, margin stability', color: 'red' },
-              { id: 'memo', name: 'Memo Gen', icon: '📝', description: 'Investment thesis & memo', color: 'blue' },
-            ]}
-            output="Scored & ranked"
-            active={activePhase === 'scoring'}
-            metrics={agentMetrics.scoring}
-          />
-        </motion.div>
-
-        {/* Arrow to results */}
-        <div className="flex justify-center mb-12">
-          <motion.div
-            animate={{ scale: activePhase === 'complete' ? 1 : 0.8, opacity: activePhase === 'complete' ? 1 : 0.5 }}
-            className="h-12 relative"
-          >
-            <svg className="w-8 h-12" viewBox="0 0 32 48" fill="none">
-              <motion.path
-                d="M16 0 L16 40 M16 40 L10 34 M16 40 L22 34"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="text-stone-400"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                initial={{ pathLength: 0 }}
-                animate={{ pathLength: activePhase === 'complete' ? 1 : 0 }}
-                transition={{ duration: 0.8 }}
-              />
-            </svg>
-          </motion.div>
-        </div>
-
-        {/* Results */}
-        <motion.div
-          animate={{ opacity: activePhase === 'complete' ? 1 : 0.3 }}
-          className="text-center p-6 bg-gradient-to-r from-emerald-50 to-blue-50 border border-emerald-200 rounded-lg"
-        >
-          <div className="section-label mb-2">Results</div>
-          <div className="text-2xl font-semibold text-emerald-600">✨ Screening Complete</div>
-          <p className="text-sm text-stone-600 mt-2">All companies ranked and ready for review</p>
-        </motion.div>
       </div>
 
-      {/* Data flow legend */}
-      <div className="grid grid-cols-3 gap-4">
-        <DataFlowBox
-          title="Selection Input"
-          items={['1000 candidates', 'Metrics', 'Company info']}
-          color="blue"
-        />
-        <DataFlowBox
-          title="Agent Chain"
-          items={['5 parallel agents', 'Rule-based + LLM', 'Confidence scoring']}
-          color="purple"
-        />
-        <DataFlowBox
-          title="Scoring Input"
-          items={['40-50 pre-filtered', 'Real data only', 'Lower LLM cost']}
-          color="emerald"
-        />
-      </div>
     </div>
   )
 }
 
-function AgentPhase({ title, agents, output, active, metrics }) {
+// ── Selection chain (always rendered in Phase 2) ─────────────────────────────
+
+function SelectionChain({ status, isSelectionPhase, isScoringDone }) {
+  const currentAgent  = status?.current_agent  ?? null
+  const currentTicker = status?.current_ticker ?? null
+  const done          = status?.companies_scored ?? 0
+  const total         = status?.tickers_found   ?? 0
+
+  // Map agent id → index; -1 means none running
+  const currentIdx = isSelectionPhase ? AGENT_ORDER.indexOf(currentAgent ?? '') : -1
+
+  // Keep a rolling log of [ticker, agent] pairs we've seen
+  const logRef = useRef([])
+
+  useEffect(() => {
+    if (!currentTicker || !currentAgent) return
+    const entry = { ticker: currentTicker, agent: currentAgent, t: Date.now() }
+    logRef.current = [...logRef.current.slice(-29), entry]
+  }, [currentTicker, currentAgent])
+
   return (
-    <div>
-      <h4 className="font-semibold text-stone-800 mb-4">{title}</h4>
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4">
-        {agents.map(agent => (
-          <AgentCard
-            key={agent.id}
-            {...agent}
-            active={active}
-          />
-        ))}
+    <div className="flex gap-6">
+
+      {/* ── Agent chain ── */}
+      <div className="flex-1 min-w-0">
+
+        {/* Current company banner — only during selection */}
+        <AnimatePresence mode="wait">
+          {isSelectionPhase && currentTicker && (
+            <motion.div
+              key={currentTicker}
+              initial={{ opacity: 0, x: -8 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: 8 }}
+              className="flex items-center gap-3 mb-4 p-2.5 bg-blue-50 border border-blue-200 rounded-md"
+            >
+              <div className="w-2 h-2 rounded-full bg-blue-500 animate-pulse flex-shrink-0" />
+              <span className="text-xs text-blue-500 font-medium">Evaluating</span>
+              <span className="font-mono text-sm font-bold text-stone-800">{currentTicker}</span>
+              <span className="ml-auto text-xs text-stone-400 tabular-nums">{done}/{total}</span>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* The 5-agent vertical chain */}
+        <div>
+          {SELECTION_AGENTS.map((agent, i) => {
+            let state
+            if (isScoringDone) {
+              state = 'passed'
+            } else if (!isSelectionPhase) {
+              state = 'pending'
+            } else if (currentIdx === -1) {
+              state = 'pending'
+            } else if (i < currentIdx) {
+              state = 'passed'
+            } else if (i === currentIdx) {
+              state = 'active'
+            } else {
+              state = 'pending'
+            }
+
+            return (
+              <div key={agent.id}>
+                <AgentChainNode agent={agent} state={state} />
+                {i < SELECTION_AGENTS.length - 1 && (
+                  <AgentConnector
+                    flowing={state === 'active'}
+                    done={state === 'passed'}
+                    passMessage={agent.passes}
+                  />
+                )}
+              </div>
+            )
+          })}
+        </div>
+
       </div>
-      <div className="flex items-center justify-end text-sm">
-        <span className="text-stone-500">Output: </span>
-        <motion.span
-          initial={{ opacity: 0, x: -10 }}
-          animate={{ opacity: 1, x: 0 }}
-          className="ml-2 font-semibold text-emerald-600"
-        >
-          {metrics?.count ? `${metrics.count} ${output}` : output}
-        </motion.span>
-      </div>
+
+      {/* ── Live decision log ── */}
+      {isSelectionPhase && <LiveLog logRef={logRef} />}
+
     </div>
   )
 }
 
-function AgentCard({ id, name, icon, description, color, active }) {
-  const colorMap = {
-    blue: 'bg-blue-50 border-blue-200 text-blue-700',
-    emerald: 'bg-emerald-50 border-emerald-200 text-emerald-700',
-    amber: 'bg-amber-50 border-amber-200 text-amber-700',
-    purple: 'bg-purple-50 border-purple-200 text-purple-700',
-    red: 'bg-red-50 border-red-200 text-red-700',
-    gold: 'bg-yellow-50 border-yellow-200 text-yellow-700',
-  }
+// ── Single agent node in the chain ───────────────────────────────────────────
+
+function AgentChainNode({ agent, state }) {
+  const [hovered, setHovered] = useState(false)
+  const c = COLOR[agent.color]
+
+  const isActive  = state === 'active'
+  const isPassed  = state === 'passed'
+
+  return (
+    <div className="relative">
+      <motion.div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        animate={{
+          scale: isActive ? 1.03 : 1,
+          opacity: state === 'pending' ? 0.4 : 1,
+        }}
+        transition={{ duration: 0.2 }}
+        className={clsx(
+          'flex items-center gap-3 p-3 rounded-lg border-2 cursor-default transition-shadow',
+          isActive  && `${c.bg} ${c.border} ring-4 ${c.ring} shadow-xl`,
+          isPassed  && 'bg-emerald-50 border-emerald-300',
+          state === 'pending' && 'bg-stone-50 border-stone-200',
+        )}
+      >
+        {/* State icon */}
+        <div className="flex-shrink-0 w-7 flex items-center justify-center">
+          {isActive && (
+            <motion.div
+              animate={{ scale: [1, 1.4, 1], opacity: [1, 0.6, 1] }}
+              transition={{ repeat: Infinity, duration: 0.9 }}
+              className={clsx('w-3 h-3 rounded-full', c.dot)}
+            />
+          )}
+          {isPassed  && (
+            <div className="w-5 h-5 rounded-full bg-emerald-100 border border-emerald-300 flex items-center justify-center">
+              <span className="text-emerald-600 text-[10px] font-bold">✓</span>
+            </div>
+          )}
+          {state === 'pending' && (
+            <div className="w-5 h-5 rounded-full border-2 border-stone-200" />
+          )}
+        </div>
+
+        {/* Agent icon */}
+        <span className={clsx('text-xl leading-none', state === 'pending' && 'grayscale opacity-40')}>{agent.icon}</span>
+
+        {/* Name + role */}
+        <div className="flex-1 min-w-0">
+          <div className={clsx(
+            'text-xs font-bold truncate',
+            isActive  ? c.text :
+            isPassed  ? 'text-emerald-700' :
+                        'text-stone-400'
+          )}>
+            {agent.name}
+          </div>
+          <div className="text-[10px] text-stone-400 truncate">{agent.role}</div>
+        </div>
+
+        {/* State badge */}
+        <div className="flex-shrink-0">
+          {isActive && (
+            <span className={clsx('px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide uppercase', c.bg, c.text)}>
+              ● Running
+            </span>
+          )}
+          {isPassed && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-100 text-emerald-600">
+              Passed
+            </span>
+          )}
+          {state === 'pending' && (
+            <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-stone-100 text-stone-400">
+              Waiting
+            </span>
+          )}
+        </div>
+      </motion.div>
+
+      {/* Hover tooltip */}
+      <AnimatePresence>
+        {hovered && (
+          <AgentTooltip agent={agent} state={state} />
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+// ── Tooltip shown on hover ────────────────────────────────────────────────────
+
+function AgentTooltip({ agent, state }) {
+  const c = COLOR[agent.color]
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
-      animate={{ opacity: active ? 1 : 0.6, y: 0 }}
-      className={clsx(
-        'p-3 border rounded-lg text-center cursor-pointer transition',
-        colorMap[color],
-        active && 'ring-2 ring-offset-2 ring-stone-400 shadow-md'
-      )}
+      initial={{ opacity: 0, x: 8, scale: 0.95 }}
+      animate={{ opacity: 1, x: 0, scale: 1 }}
+      exit={{ opacity: 0, x: 8, scale: 0.95 }}
+      transition={{ duration: 0.15 }}
+      className="absolute left-full top-0 ml-3 z-50 w-60 bg-white border border-stone-200 rounded-lg shadow-xl p-4"
+      style={{ pointerEvents: 'none' }}
     >
-      <div className="text-2xl mb-1">{icon}</div>
-      <div className="text-xs font-semibold">{name}</div>
-      <div className="text-[10px] opacity-70 leading-tight mt-1">{description}</div>
+      {/* Header */}
+      <div className="flex items-center gap-2 mb-3">
+        <span className="text-xl">{agent.icon}</span>
+        <div>
+          <div className={clsx('text-xs font-bold', c.text)}>{agent.name}</div>
+          <div className="text-[10px] text-stone-400">{agent.role}</div>
+        </div>
+      </div>
+
+      {/* What it checks */}
+      <div className="mb-3">
+        <div className="text-[10px] font-semibold text-stone-500 uppercase tracking-wide mb-1.5">Checks</div>
+        <ul className="space-y-1">
+          {agent.checks.map((c, i) => (
+            <li key={i} className="flex items-start gap-1.5 text-[11px] text-stone-700">
+              <span className="text-stone-300 mt-0.5 flex-shrink-0">▸</span>
+              {c}
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      {/* Divider */}
+      <div className="border-t border-stone-100 my-3" />
+
+      {/* Pass/reject outcome */}
+      <div className="space-y-1.5">
+        <div className="flex items-start gap-1.5 text-[11px]">
+          <span className="text-emerald-500 flex-shrink-0">✓</span>
+          <span className="text-stone-600">{agent.passes}</span>
+        </div>
+        <div className="flex items-start gap-1.5 text-[11px]">
+          <span className="text-red-400 flex-shrink-0">✗</span>
+          <span className="text-stone-600">{agent.rejects}</span>
+        </div>
+      </div>
+
+      {/* Current state tag */}
+      {state !== 'pending' && (
+        <div className={clsx(
+          'mt-3 text-center text-[10px] font-semibold py-1 rounded',
+          state === 'active' ? `${COLOR[agent.color].bg} ${COLOR[agent.color].text}` : 'bg-emerald-50 text-emerald-600'
+        )}>
+          {state === 'active' ? '● Running now' : '✓ Already passed'}
+        </div>
+      )}
     </motion.div>
   )
 }
 
-function DataFlowBox({ title, items, color }) {
-  const colorMap = {
-    blue: 'border-blue-200 bg-blue-50',
-    emerald: 'border-emerald-200 bg-emerald-50',
-    purple: 'border-purple-200 bg-purple-50',
-  }
+// ── Arrow connector between agents ───────────────────────────────────────────
+
+function AgentConnector({ flowing, done, passMessage }) {
+  const [hovTip, setHovTip] = useState(false)
+
+  const lineColor = flowing ? '#60a5fa' : done ? '#6ee7b7' : '#d1d5db'
+  const arrowColor = flowing ? '#3b82f6' : done ? '#34d399' : '#d1d5db'
 
   return (
-    <div className={clsx('p-4 border rounded-lg', colorMap[color])}>
-      <div className="font-semibold text-sm mb-2 text-stone-800">{title}</div>
-      <ul className="space-y-1">
-        {items.map((item, i) => (
-          <li key={i} className="text-xs text-stone-600 flex items-center gap-2">
-            <span className="w-1 h-1 bg-stone-400 rounded-full"></span>
-            {item}
-          </li>
-        ))}
-      </ul>
+    <div
+      className="relative flex items-center py-0 ml-5"
+      onMouseEnter={() => setHovTip(true)}
+      onMouseLeave={() => setHovTip(false)}
+    >
+      {/* SVG arrow: vertical line + arrowhead */}
+      <svg width="24" height="32" viewBox="0 0 24 32" fill="none" className="flex-shrink-0">
+        {/* Vertical stem */}
+        <line x1="12" y1="0" x2="12" y2="22" stroke={lineColor} strokeWidth="2" strokeLinecap="round" />
+        {/* Arrowhead */}
+        <path d="M6 18 L12 26 L18 18" stroke={arrowColor} strokeWidth="2" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+
+      {/* Flowing dot travelling down the arrow */}
+      {flowing && (
+        <motion.div
+          animate={{ y: [0, 24, 0] }}
+          transition={{ repeat: Infinity, duration: 0.7, ease: 'linear' }}
+          className="absolute left-5 w-2 h-2 rounded-full bg-blue-400 shadow shadow-blue-300"
+          style={{ top: 0, marginLeft: '-1px' }}
+        />
+      )}
+
+      {/* Hover: pass message tooltip */}
+      <AnimatePresence>
+        {hovTip && passMessage && (
+          <motion.div
+            initial={{ opacity: 0, x: -4 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0 }}
+            className="absolute left-8 z-40 bg-stone-800 text-white text-[10px] px-2 py-1 rounded whitespace-nowrap shadow-lg"
+            style={{ pointerEvents: 'none', top: 8 }}
+          >
+            Passes if: {passMessage}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
+}
+
+// ── Rolling live log (right side panel) ──────────────────────────────────────
+
+function LiveLog({ logRef }) {
+  const [tick, setTick] = useState(0)
+
+  // Refresh every 2 seconds to show latest entries
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 2000)
+    return () => clearInterval(id)
+  }, [])
+
+  const entries = logRef.current.slice(-12).reverse()
+  if (entries.length === 0) return null
+
+  const agentMeta = Object.fromEntries(SELECTION_AGENTS.map(a => [a.id, a]))
+
+  return (
+    <div className="w-40 flex-shrink-0">
+      <div className="text-[10px] font-semibold text-stone-400 uppercase tracking-wide mb-2">Recent</div>
+      <div className="space-y-1">
+        {entries.map((e, i) => {
+          const meta = agentMeta[e.agent]
+          return (
+            <motion.div
+              key={`${e.ticker}-${e.agent}-${e.t}`}
+              initial={{ opacity: 0, y: -4 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex items-center gap-1.5"
+            >
+              <span className="text-[10px] font-mono text-stone-500 truncate flex-1">{e.ticker}</span>
+              {meta && (
+                <span className="text-[10px]">{meta.icon}</span>
+              )}
+            </motion.div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Shared small helpers ──────────────────────────────────────────────────────
+
+function PhaseRow({ label, active, done, children }) {
+  return (
+    <motion.div
+      animate={{ opacity: active || done ? 1 : 0.4 }}
+      className="p-5"
+    >
+      <div className="flex items-center gap-2 mb-4">
+        <div className={clsx(
+          'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold flex-shrink-0',
+          done   ? 'bg-emerald-100 text-emerald-600' :
+          active ? 'bg-blue-100 text-blue-600 ring-2 ring-blue-300' :
+                   'bg-stone-100 text-stone-400'
+        )}>
+          {done ? '✓' : active ? '●' : '○'}
+        </div>
+        <span className={clsx(
+          'text-xs font-semibold uppercase tracking-wide',
+          done ? 'text-emerald-600' : active ? 'text-blue-700' : 'text-stone-400'
+        )}>
+          {label}
+        </span>
+      </div>
+      {children}
+    </motion.div>
+  )
+}
+
+function PhaseConnector({ active }) {
+  return (
+    <div className="flex items-center px-5 py-1 gap-3">
+      <div className="w-px h-6 bg-stone-200 ml-2 relative overflow-hidden">
+        {active && (
+          <motion.div
+            animate={{ y: ['-100%', '100%'] }}
+            transition={{ repeat: Infinity, duration: 0.9, ease: 'linear' }}
+            className="absolute inset-x-0 h-3 bg-gradient-to-b from-transparent via-blue-400 to-transparent"
+          />
+        )}
+      </div>
+      <svg className="w-3 h-3 text-stone-300" viewBox="0 0 12 12" fill="currentColor">
+        <path d="M6 0 L6 8 M6 8 L3 5 M6 8 L9 5" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" />
+      </svg>
+    </div>
+  )
+}
+
+function SmallAgentBadge({ name, icon, color, desc, active, done }) {
+  const c = COLOR[color] ?? COLOR.blue
+  return (
+    <div className={clsx(
+      'px-2.5 py-1.5 rounded-md border text-[11px] flex items-center gap-1.5 transition',
+      done   ? 'bg-emerald-50 border-emerald-200 text-emerald-700' :
+      active ? `${c.bg} ${c.border} ${c.text}` :
+               'bg-stone-50 border-stone-200 text-stone-400'
+    )}>
+      <span>{icon}</span>
+      <span className="font-semibold">{name}</span>
     </div>
   )
 }

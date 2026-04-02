@@ -28,6 +28,7 @@ export const api = {
 
   portfolio: () => get('/portfolio'),
   scanIR: () => post('/portfolio/scan-ir', {}),
+  scanIRStatus: () => get('/portfolio/scan-ir/status'),
   tickerSignals: (ticker) => get(`/portfolio/${ticker}/signals`),
   insiders: (days = 30) => get(`/insiders?days=${days}`),
 

@@ -10,6 +10,116 @@ import StatusBadge from '../components/StatusBadge'
 import VerdictBanner from '../components/VerdictBanner'
 import { TableSkeleton } from '../components/Skeleton'
 
+// ── Memo renderer ────────────────────────────────────────────────────────────
+function MemoRenderer({ text }) {
+  if (!text) return (
+    <p className="text-sm text-stone-400 italic">No memo generated — re-run screening.</p>
+  )
+
+  const lines = text.split('\n')
+  const elements = []
+  let i = 0
+
+  while (i < lines.length) {
+    const line = lines[i]
+    const trimmed = line.trim()
+
+    // Skip empty lines (handled as spacing)
+    if (!trimmed) {
+      i++
+      continue
+    }
+
+    // H1 — lines starting with # or ALL CAPS lines ending with :
+    if (/^#{1,2}\s/.test(trimmed)) {
+      const content = trimmed.replace(/^#+\s+/, '')
+      elements.push(
+        <h3 key={i} className="text-[11px] font-bold tracking-[0.12em] uppercase text-gold-700
+                               mt-6 mb-2 first:mt-0 border-b border-stone-100 pb-1.5">
+          {content}
+        </h3>
+      )
+      i++
+      continue
+    }
+
+    // Section header — ALLCAPS words with optional colon at end
+    if (/^[A-Z][A-Z\s&\/\-]{3,}:?\s*$/.test(trimmed)) {
+      elements.push(
+        <h3 key={i} className="text-[11px] font-bold tracking-[0.12em] uppercase text-gold-700
+                               mt-6 mb-2 first:mt-0 border-b border-stone-100 pb-1.5">
+          {trimmed.replace(/:$/, '')}
+        </h3>
+      )
+      i++
+      continue
+    }
+
+    // Bullet point — -, •, *, or numbered
+    if (/^[-•*]\s/.test(trimmed) || /^\d+\.\s/.test(trimmed)) {
+      const bulletLines = []
+      while (i < lines.length && (/^[-•*]\s/.test(lines[i].trim()) || /^\d+\.\s/.test(lines[i].trim()))) {
+        bulletLines.push(lines[i].trim().replace(/^[-•*]\s+/, '').replace(/^\d+\.\s+/, ''))
+        i++
+      }
+      elements.push(
+        <ul key={i + '-ul'} className="space-y-1.5 mb-3 ml-0">
+          {bulletLines.map((b, j) => (
+            <li key={j} className="flex gap-2 text-sm text-stone-700 leading-relaxed">
+              <span className="text-gold-500 font-bold flex-shrink-0 mt-0.5">·</span>
+              <span dangerouslySetInnerHTML={{ __html: formatInline(b) }} />
+            </li>
+          ))}
+        </ul>
+      )
+      continue
+    }
+
+    // Key: Value pattern (e.g. "Revenue Growth: 22%")
+    const kvMatch = trimmed.match(/^([A-Za-z][A-Za-z\s\/\-]{1,30}):\s+(.+)$/)
+    if (kvMatch && kvMatch[1].split(' ').length <= 5) {
+      elements.push(
+        <div key={i} className="flex gap-2 text-sm mb-1.5">
+          <span className="font-semibold text-stone-700 flex-shrink-0">{kvMatch[1]}:</span>
+          <span className="text-stone-600" dangerouslySetInnerHTML={{ __html: formatInline(kvMatch[2]) }} />
+        </div>
+      )
+      i++
+      continue
+    }
+
+    // Regular paragraph — collect consecutive non-special lines
+    const paraLines = []
+    while (
+      i < lines.length &&
+      lines[i].trim() &&
+      !/^#{1,2}\s/.test(lines[i].trim()) &&
+      !/^[A-Z][A-Z\s&\/\-]{3,}:?\s*$/.test(lines[i].trim()) &&
+      !/^[-•*]\s/.test(lines[i].trim()) &&
+      !/^\d+\.\s/.test(lines[i].trim())
+    ) {
+      paraLines.push(lines[i].trim())
+      i++
+    }
+    if (paraLines.length) {
+      elements.push(
+        <p key={i + '-p'} className="text-sm text-stone-600 leading-relaxed mb-3"
+           dangerouslySetInnerHTML={{ __html: formatInline(paraLines.join(' ')) }} />
+      )
+    }
+  }
+
+  return <div className="memo-body space-y-0.5">{elements}</div>
+}
+
+// Inline formatting: **bold**, *italic*, `code`
+function formatInline(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, '<strong class="font-semibold text-stone-800">$1</strong>')
+    .replace(/\*(.+?)\*/g,     '<em class="italic text-stone-700">$1</em>')
+    .replace(/`(.+?)`/g,       '<code class="font-mono text-xs bg-stone-100 text-stone-700 px-1 py-0.5 rounded">$1</code>')
+}
+
 // ── Formatting ────────────────────────────────────────────────────────────────
 const fmtPct  = v => v == null ? '—' : `${v > 10 ? v.toFixed(1) : v.toFixed(1)}%`
 const fmtMult = v => v == null ? '—' : `${v.toFixed(1)}x`
@@ -336,12 +446,7 @@ function DetailDrawer({ row, onClose, onFeedback }) {
       <div className="flex-1 overflow-y-auto px-7 py-5">
         {tab === 'memo' && (
           <div className="animate-fade-in">
-            {row.memo_text
-              ? <p className="text-sm text-stone-600 leading-relaxed whitespace-pre-line">
-                  {row.memo_text}
-                </p>
-              : <p className="text-sm text-stone-400 italic">No memo generated — re-run screening.</p>
-            }
+            <MemoRenderer text={row.memo_text} />
           </div>
         )}
 
@@ -553,7 +658,7 @@ function ActionBtn({ label, color, active, disabled, onClick }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function ResultsPage() {
-  const { data: rows, loading, error, reload } = useApi(() => api.recommendations(100))
+  const { data: rows, loading, error, reload } = useApi(() => api.recommendations(100), [])
   const [selected, setSelected] = useState(null)
   const [filters, setFilters]   = useState({
     search: '', minFit: '0', maxRisk: '100', status: '', sector: '', sort: 'score'
