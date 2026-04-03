@@ -523,7 +523,12 @@ async def _fetch_yahoo_timeseries(ticker: str) -> dict[str, Any]:
         return cached
 
     BASE  = "https://query1.finance.yahoo.com/ws/fundamentals-timeseries/v1/finance/timeseries"
-    TYPES = "annualTotalRevenue,annualGrossProfit,annualNetIncome,annualOperatingIncome,annualFreeCashFlow,annualCapitalExpenditure"
+    TYPES = (
+        "annualTotalRevenue,annualGrossProfit,annualNetIncome,annualOperatingIncome,"
+        "annualFreeCashFlow,annualCapitalExpenditure,"
+        "annualTotalDebt,annualCashAndCashEquivalents,annualStockholdersEquity,"
+        "annualDepreciationAmortization"
+    )
     import time as _time
     P1 = "1577836800"  # 2020-01-01
     P2 = str(int(_time.time()) + 86400)  # tomorrow (always current)
@@ -554,6 +559,10 @@ async def _fetch_yahoo_timeseries(ticker: str) -> dict[str, Any]:
             ebit         = data.get("annualOperatingIncome")
             fcf          = data.get("annualFreeCashFlow")
             capex        = data.get("annualCapitalExpenditure")
+            total_debt   = data.get("annualTotalDebt")
+            cash         = data.get("annualCashAndCashEquivalents")
+            equity       = data.get("annualStockholdersEquity")
+            dep          = data.get("annualDepreciationAmortization")
 
             if not revenue:
                 return {}
@@ -584,6 +593,9 @@ async def _fetch_yahoo_timeseries(ticker: str) -> dict[str, Any]:
             except Exception:
                 pass
 
+            net_debt = (total_debt - cash) if (total_debt is not None and cash is not None) else None
+            ebitda   = (ebit + dep) if (ebit is not None and dep is not None) else None
+
             result = {
                 "revenue":        revenue,
                 "gross_profit":   gross_profit,
@@ -591,6 +603,11 @@ async def _fetch_yahoo_timeseries(ticker: str) -> dict[str, Any]:
                 "net_income":     net_income,
                 "fcf":            fcf,
                 "capex":          abs(capex) if capex else None,
+                "total_debt":     total_debt,
+                "cash":           cash,
+                "net_debt":       net_debt,
+                "equity":         equity,
+                "ebitda":         ebitda,
                 "revenue_growth": rev_yoy,
                 "market_cap_fmp": mc,
                 "roic":           None,
@@ -800,14 +817,42 @@ def _compute_metrics(ticker: str, market_cap: float | None,
     equity       = fin.get("equity")
     rev_series   = fin.get("rev_series", [])
 
+    equity       = fin.get("equity")
+    total_debt   = fin.get("total_debt")
+
     # Use `is not None` (not falsy) so 0.0 values are preserved correctly
     gm      = (gross_profit / revenue) if (gross_profit is not None and revenue) else None
     em      = (ebit / revenue)         if (ebit is not None and revenue)         else None
     fcf_y   = (fcf / market_cap)       if (fcf is not None and market_cap)       else None
     cap_rev = (capex / revenue)        if (capex is not None and revenue)        else None
-    nd_eb   = (net_debt / ebitda)      if (net_debt is not None and ebitda and ebitda > 0) else None
-    roic    = fin.get("roic") or ((ebit / total_assets) if (ebit is not None and total_assets and total_assets > 0) else None)
-    roe     = fin.get("roe")  or ((net_income / equity) if (net_income is not None and equity and equity > 0) else None)
+
+    # EBITDA: use direct value (FMP/EDGAR), else compute from ebit + D&A
+    dep    = fin.get("dep")
+    ebitda = ebitda or ((ebit + dep) if (ebit is not None and dep is not None) else None)
+
+    # Net debt: prefer directly computed, else derive from total_debt - cash
+    cash = fin.get("cash")
+    if net_debt is None and total_debt is not None and cash is not None:
+        net_debt = total_debt - cash
+
+    nd_eb = (net_debt / ebitda) if (net_debt is not None and ebitda and ebitda > 0) else None
+
+    # ROIC: prefer FMP direct, then ebit/(equity+net_debt) [proper invested capital],
+    # last resort ebit/total_assets [ROA proxy — only when no balance sheet available]
+    invested_capital = None
+    if equity is not None and total_debt is not None:
+        invested_capital = equity + total_debt
+    elif equity is not None and net_debt is not None:
+        invested_capital = equity + net_debt
+    elif equity is not None:
+        invested_capital = equity
+
+    roic = (
+        fin.get("roic")
+        or ((ebit / invested_capital) if (ebit is not None and invested_capital and invested_capital > 0) else None)
+        or ((ebit / total_assets)     if (ebit is not None and total_assets and total_assets > 0) else None)
+    )
+    roe  = fin.get("roe") or ((net_income / equity) if (net_income is not None and equity and equity > 0) else None)
 
     ev      = (market_cap + net_debt) if (market_cap is not None and net_debt is not None) else market_cap
     ev_ebit = (ev / ebit) if (ev is not None and ebit and ebit > 0) else None

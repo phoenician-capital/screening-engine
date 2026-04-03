@@ -288,30 +288,65 @@ class UniverseExpander:
 
                     cur.execute("""
                         INSERT INTO metrics
-                            (ticker, period_end, period_type, revenue, gross_margin, ebit,
-                             ebit_margin, net_income, fcf, roic, fcf_yield, revenue_growth_yoy,
-                             net_debt_ebitda, total_assets, market_cap_usd, ev_ebit,
-                             avg_daily_volume, analyst_count, insider_ownership_pct)
-                        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                            (ticker, period_end, period_type,
+                             revenue, gross_profit, gross_margin,
+                             ebit, ebit_margin,
+                             net_income, fcf, fcf_yield,
+                             capex, capex_to_revenue,
+                             net_debt, net_debt_ebitda, total_assets,
+                             roic, roe,
+                             revenue_growth_yoy, revenue_growth_3yr_cagr,
+                             market_cap_usd, ev_ebit, ev_fcf,
+                             avg_daily_volume, analyst_count,
+                             insider_ownership_pct,
+                             stock_repurchased, stock_based_compensation, acquisitions_net)
+                        VALUES (
+                            %s,%s,%s,
+                            %s,%s,%s,
+                            %s,%s,
+                            %s,%s,%s,
+                            %s,%s,
+                            %s,%s,%s,
+                            %s,%s,
+                            %s,%s,
+                            %s,%s,%s,
+                            %s,%s,
+                            %s,
+                            %s,%s,%s
+                        )
                         ON CONFLICT (ticker, period_end, period_type) DO UPDATE SET
-                            revenue=EXCLUDED.revenue, gross_margin=EXCLUDED.gross_margin,
-                            ebit=EXCLUDED.ebit, net_income=EXCLUDED.net_income,
-                            fcf=EXCLUDED.fcf, roic=EXCLUDED.roic,
-                            fcf_yield=EXCLUDED.fcf_yield,
-                            revenue_growth_yoy=EXCLUDED.revenue_growth_yoy,
+                            revenue=EXCLUDED.revenue,
+                            gross_profit=EXCLUDED.gross_profit,
+                            gross_margin=EXCLUDED.gross_margin,
+                            ebit=EXCLUDED.ebit,
+                            net_income=EXCLUDED.net_income,
+                            fcf=EXCLUDED.fcf, fcf_yield=EXCLUDED.fcf_yield,
+                            capex=EXCLUDED.capex,
+                            net_debt=EXCLUDED.net_debt,
                             net_debt_ebitda=EXCLUDED.net_debt_ebitda,
                             total_assets=EXCLUDED.total_assets,
-                            market_cap_usd=EXCLUDED.market_cap_usd
+                            roic=EXCLUDED.roic, roe=EXCLUDED.roe,
+                            revenue_growth_yoy=EXCLUDED.revenue_growth_yoy,
+                            revenue_growth_3yr_cagr=EXCLUDED.revenue_growth_3yr_cagr,
+                            market_cap_usd=EXCLUDED.market_cap_usd,
+                            ev_ebit=EXCLUDED.ev_ebit, ev_fcf=EXCLUDED.ev_fcf,
+                            stock_repurchased=EXCLUDED.stock_repurchased,
+                            stock_based_compensation=EXCLUDED.stock_based_compensation,
+                            acquisitions_net=EXCLUDED.acquisitions_net
                     """, (
                         ticker, dt.date.today(), "snapshot",
-                        _f(m.get("revenue")), _f(m.get("gross_margin")),
+                        _f(m.get("revenue")), _f(m.get("gross_profit")), _f(m.get("gross_margin")),
                         _f(m.get("ebit")), _f(m.get("ebit_margin")),
-                        _f(m.get("net_income")), _f(m.get("fcf")),
-                        _f(m.get("roic")), _f(m.get("fcf_yield")),
-                        _f(m.get("revenue_growth_yoy")), _f(m.get("net_debt_ebitda")),
-                        _f(m.get("total_assets")), _f(m.get("market_cap_usd")),
-                        _f(m.get("ev_ebit")), _f(m.get("avg_daily_volume")),
-                        m.get("analyst_count"), _f(m.get("insider_ownership_pct")),
+                        _f(m.get("net_income")), _f(m.get("fcf")), _f(m.get("fcf_yield")),
+                        _f(m.get("capex")), _f(m.get("capex_to_revenue")),
+                        _f(m.get("net_debt")), _f(m.get("net_debt_ebitda")), _f(m.get("total_assets")),
+                        _f(m.get("roic")), _f(m.get("roe")),
+                        _f(m.get("revenue_growth_yoy")), _f(m.get("revenue_growth_3yr_cagr")),
+                        _f(m.get("market_cap_usd")), _f(m.get("ev_ebit")), _f(m.get("ev_fcf")),
+                        _f(m.get("avg_daily_volume")), m.get("analyst_count"),
+                        _f(m.get("insider_ownership_pct")),
+                        _f(m.get("stock_repurchased")), _f(m.get("stock_based_compensation")),
+                        _f(m.get("acquisitions_net")),
                     ))
 
                     conn.commit()
