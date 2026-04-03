@@ -91,11 +91,11 @@ class HardFilterEngine:
         if ticker and ticker.upper() in self.excluded_tickers:
             return FilterResult(passed=False, reason=f"Explicitly excluded ticker: {ticker}")
 
-        # 0a. ETF / fund exclusion
+        # 1. ETF / fund exclusion — objective fact, not a quality judgment
         if is_etf:
             return FilterResult(passed=False, reason="ETF or mutual fund excluded")
 
-        # 0b. Debt instruments — bonds, debentures, notes, preferred shares
+        # 2. Debt instruments — bonds, notes, preferred shares, warrants
         _DEBT_KEYWORDS = (
             "debenture", "subordinated", "notes due", "% fixed", "% senior",
             "preferred shares", "depositary shares", "warrant", "rights",
@@ -107,50 +107,23 @@ class HardFilterEngine:
                 if kw in name_lower:
                     return FilterResult(passed=False, reason=f"Debt/non-equity instrument: {kw}")
 
-        # 1. Sector exclusion — check both GICS code ("40") and text name ("Financials")
-        if gics_sector:
-            if gics_sector in self.excluded_sectors:
-                return FilterResult(passed=False, reason=f"Excluded sector: {gics_sector}")
-            if gics_sector.lower() in self.excluded_sector_names:
-                return FilterResult(passed=False, reason=f"Excluded sector: {gics_sector}")
-
-        # 2. Sub-industry exclusion
-        if gics_sub_industry and gics_sub_industry in self.excluded_sub_industries:
-            return FilterResult(passed=False, reason=f"Excluded sub-industry: {gics_sub_industry}")
-
-        # 3. Country exclusion — hard block
+        # 3. Country exclusion — geopolitical hard block
         if country and country.upper() in self.excluded_countries:
             return FilterResult(passed=False, reason=f"Excluded country: {country}")
 
-        # 3b. Allowed market check — reject if outside Tier 1 + Tier 2 (when lists are configured)
+        # 4. Allowed market check
         _all_allowed = self.allowed_tier1 | self.allowed_tier2
         if country and _all_allowed and country.upper() not in _all_allowed:
             return FilterResult(passed=False, reason=f"Market not in allowed list: {country}")
 
-        # 4. Market cap bounds
+        # 5. Market cap bounds — sizing mandate, objective fact
         if market_cap is not None:
             if market_cap < self.min_market_cap:
                 return FilterResult(passed=False, reason=f"Market cap too small: ${market_cap/1e6:.0f}M")
             if market_cap > self.max_market_cap:
                 return FilterResult(passed=False, reason=f"Market cap too large: ${market_cap/1e9:.1f}B")
 
-        # 5. Gross margin floor
-        if gross_margin is not None and gross_margin < self.min_gross_margin:
-            return FilterResult(passed=False, reason=f"Gross margin below floor: {gross_margin:.1%} < {self.min_gross_margin:.0%}")
-
-        # 6. Leverage cap
-        if net_debt_ebitda is not None and net_debt_ebitda > self.max_leverage:
-            return FilterResult(passed=False, reason=f"Leverage too high: {net_debt_ebitda:.1f}x > {self.max_leverage:.0f}x")
-
-        # 7. Avg daily volume floor
-        if self.min_avg_daily_volume > 0 and avg_daily_volume is not None:
-            if avg_daily_volume < self.min_avg_daily_volume:
-                return FilterResult(passed=False, reason=f"Avg daily volume too low: ${avg_daily_volume/1e3:.0f}K")
-
-        # 8. Profitability requirement
-        if self.require_profitable and net_income is not None and net_income < 0:
-            return FilterResult(passed=False, reason=f"Unprofitable: net income ${net_income/1e6:.1f}M")
-
+        # All category/quality judgments are delegated to LLM agents
         return FilterResult(passed=True)
 
     def passes_min_score(self, composite_score: float, market_tier: int = 1) -> bool:

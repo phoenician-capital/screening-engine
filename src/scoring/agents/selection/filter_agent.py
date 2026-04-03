@@ -47,6 +47,23 @@ class FilterAgent(BaseAgent):
         failures = []
         missing = []
 
+        # Reject companies with completely missing financial data — no basis for evaluation.
+        # A company with zero numeric data available is unscoreable and wastes LLM scoring budget.
+        all_null = (
+            metrics.gross_margin is None
+            and metrics.roic is None
+            and metrics.revenue_growth_3yr is None
+            and metrics.net_debt_ebitda is None
+            and metrics.net_income is None
+        )
+        if all_null:
+            return AgentDecision(
+                passed=False,
+                score=None,
+                reason="No financial data available — all metrics null, unscoreable",
+                metadata={},
+            )
+
         # Gross Margin — only reject if we have the data AND it's below threshold.
         # Missing gross_margin (common for intl companies via Yahoo timeseries) is not a reason
         # to reject — the LLM analyst will evaluate it via web search.

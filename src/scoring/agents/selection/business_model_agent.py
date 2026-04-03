@@ -26,63 +26,78 @@ class BusinessModelAgent(BaseAgent):
         description: str | None = None,
         segments: list[dict] | None = None,
     ) -> AgentDecision:
-        """Evaluate business model clarity."""
+        """Evaluate mandate compliance and business model clarity via LLM."""
 
-        # Red flags for conglomerate/complex structures
-        red_flags = []
-
-        if company_name:
-            # Check for holding company, conglomerate, diversified keywords
-            name_lower = company_name.lower()
-            conglomerate_keywords = [
-                "holding", "diversified", "conglomerate", "portfolio",
-                "investment company", "syndicate", "consortium",
-            ]
-            for kw in conglomerate_keywords:
-                if kw in name_lower:
-                    red_flags.append(f"Conglomerate signal: '{kw}' in name")
-
-        # Check segment diversity (if >4 major segments, high complexity)
-        if segments and len(segments) > 4:
-            red_flags.append(f"High business complexity: {len(segments)} segments")
-
-        # If we have description, use LLM to assess clarity
-        clarity_issues = []
-        if description:
-            clarity_issues = await self._assess_clarity_with_llm(description)
-
-        all_issues = red_flags + clarity_issues
-        passed = len(all_issues) == 0
-
-        reason = " | ".join(all_issues) if all_issues else "Clear, focused business model"
-
-        return AgentDecision(
-            passed=passed,
-            score=None,
-            reason=reason,
-            metadata={
-                "segment_count": len(segments) if segments else None,
-                "clarity_issues": clarity_issues,
-                "conglomerate_flags": red_flags,
-            },
+        result = await self._assess_with_llm(
+            ticker=ticker,
+            company_name=company_name,
+            description=description or "",
+            segment_count=len(segments) if segments else 0,
         )
 
-    async def _assess_clarity_with_llm(self, description: str) -> list[str]:
-        """Use LLM to assess business clarity from description."""
-        prompt = f"""
-Analyze this company description for business model clarity issues:
+        return AgentDecision(
+            passed=result["passed"],
+            score=None,
+            reason=result["reason"],
+            metadata={"segment_count": len(segments) if segments else None},
+        )
 
-"{description}"
+    async def _assess_with_llm(
+        self,
+        ticker: str,
+        company_name: str,
+        description: str,
+        segment_count: int,
+    ) -> dict:
+        """Single LLM call: mandate gate + business model clarity."""
 
-Is the core business clear and focused? Flag any:
-1. Unclear primary revenue source
-2. Mention of "various", "diverse", or undefined segments
-3. Complex or hard-to-understand business model
-4. Too many unrelated business lines
+        prompt = f"""You are a pre-screening agent for Phoenician Capital, a fund that invests ONLY in high-quality small and mid-cap compounders — founder-led or owner-operated businesses with durable competitive advantages, high returns on capital, and reinvestment-driven growth.
 
-Return a JSON list of issues found, or empty list if clear.
-Example: ["Unclear which segment is primary", "Too many unrelated businesses"]
-Be strict — conglomerates should fail.
+COMPANY: {ticker} — {company_name}
+DESCRIPTION: {description or "No description available."}
+REPORTED SEGMENTS: {segment_count if segment_count else "unknown"}
+
+═══════════════════════════════════════════════════════
+STEP 1 — MANDATE EXCLUSION CHECK (instant reject if yes)
+═══════════════════════════════════════════════════════
+Reject IMMEDIATELY if the company is in ANY of these categories — no exceptions:
+
+FINANCIAL INTERMEDIARIES: Banks, savings institutions, credit unions, thrifts, mortgage lenders, insurance companies (life, P&C, specialty), reinsurance, BDCs, finance companies, consumer lending, payment networks acting as principals (e.g. card issuers)
+NOTE: Fintech SOFTWARE companies (SaaS payments infrastructure, core banking software, compliance tech) are NOT excluded — only intermediaries that take balance-sheet risk.
+
+REAL ASSETS / COMMODITIES: REITs, real estate developers/operators, oil & gas E&P, oil services, pipelines, coal, metals mining, gold/silver miners, fertilisers, chemicals commodities, timber
+
+REGULATED MONOPOLIES: Electric utilities, gas utilities, water utilities, telecom carriers (not software), railroad infrastructure
+
+CAPITAL-INTENSIVE CYCLICALS: Airlines, cruise lines, shipping/maritime, auto manufacturers (not software/EV-tech), steel, cement, paper/pulp
+
+LOW-VALUE SERVICES: Staffing & BPO, temp agencies, facility management, cleaning services, food/restaurant chains, hotel/hospitality operators
+
+DIVERSIFIED CONGLOMERATES: Companies with 4+ unrelated business segments with no identifiable core compounder business
+
+═══════════════════════════════════════════════════════
+STEP 2 — BUSINESS MODEL CLARITY (only if Step 1 passed)
+═══════════════════════════════════════════════════════
+If not excluded, assess whether the business model is clear enough for investment analysis:
+- Is there an identifiable, focused primary business?
+- Does it have characteristics of a compounder (recurring revenue, pricing power, scalability)?
+- Is the description sufficient to understand how they make money?
+
+If description is missing or too vague to make any determination, PASS the company — the analyst agent will investigate further.
+
+═══════════════════════════════════════════════════════
+RESPOND IN THIS EXACT JSON FORMAT:
+{{
+  "passed": true or false,
+  "reason": "one clear sentence explaining the decision"
+}}
+
+Examples:
+{{"passed": false, "reason": "Regional bank — financial intermediary, excluded by mandate"}}
+{{"passed": false, "reason": "Electric utility — regulated monopoly, excluded by mandate"}}
+{{"passed": false, "reason": "Diversified conglomerate with 6 unrelated segments, no identifiable core business"}}
+{{"passed": true, "reason": "B2B SaaS company with recurring revenue and clear software-focused business model"}}
+{{"passed": true, "reason": "Insufficient description to assess — passing to analyst for investigation"}}
 """
         try:
             import json
@@ -90,22 +105,24 @@ Be strict — conglomerates should fail.
                 prompt,
                 model="claude-haiku-4-5",
                 temperature=0,
-                max_tokens=256,
+                max_tokens=150,
             )
             if isinstance(response, str):
-                # Strip markdown fences if present
                 text = response.strip()
                 if "```" in text:
                     for part in text.split("```"):
                         part = part.strip().lstrip("json").strip()
-                        if part.startswith("["):
+                        if part.startswith("{"):
                             text = part
                             break
-                start, end = text.find("["), text.rfind("]")
+                start, end = text.find("{"), text.rfind("}")
                 if start != -1 and end != -1:
-                    issues = json.loads(text[start:end+1])
-                    return issues if isinstance(issues, list) else []
-            return []
+                    data = json.loads(text[start:end+1])
+                    return {
+                        "passed": bool(data.get("passed", True)),
+                        "reason": str(data.get("reason", "LLM assessment complete")),
+                    }
+            return {"passed": True, "reason": "LLM response unparseable — passing to analyst"}
         except Exception as e:
-            logger.warning(f"Failed to assess clarity for description: {e}")
-            return []
+            logger.warning(f"BusinessModelAgent LLM call failed for {ticker}: {e}")
+            return {"passed": True, "reason": f"LLM error — passing to analyst: {e}"}

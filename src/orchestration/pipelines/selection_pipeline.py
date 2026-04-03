@@ -18,7 +18,6 @@ from src.db.models.metric import Metric
 from src.db.models.learned_patterns import SelectionAgentDecision
 from src.db.models.insider_purchase import InsiderPurchase
 from src.db.repositories import MetricRepository
-from src.scoring.agents.selection.filter_agent import FilterAgent, FilterMetrics
 from src.scoring.agents.selection.business_model_agent import BusinessModelAgent
 from src.scoring.agents.selection.founder_agent import FounderAgent
 from src.scoring.agents.selection.growth_agent import GrowthAgent
@@ -42,7 +41,6 @@ class CompanySelectionPipeline:
     def __init__(self, session: AsyncSession):
         self.session = session
         self.metric_repo = MetricRepository(session)
-        self.filter_agent = FilterAgent()
         self.business_model_agent = BusinessModelAgent()
         self.founder_agent = FounderAgent()
         self.growth_agent = GrowthAgent()
@@ -100,6 +98,27 @@ class CompanySelectionPipeline:
 
         filter_results = {}
 
+        # Objective pre-check: ETF, debt instrument, country exclusion, market cap bounds.
+        # All category/quality judgments are delegated to LLM agents below.
+        from src.scoring.filters.hard_filters import HardFilterEngine
+        _hf = HardFilterEngine()
+        _obj_check = _hf.check(
+            ticker=company.ticker,
+            country=company.country,
+            market_cap=float(company.market_cap_usd) if company.market_cap_usd else None,
+        )
+        if not _obj_check.passed:
+            await self._record_decision(company.ticker, "business_model", type("D", (), {
+                "passed": False, "score": None,
+                "reason": _obj_check.reason, "metadata": {}
+            })())
+            return SelectionResult(
+                ticker=company.ticker,
+                passed_selection=False,
+                filter_results={"business_model": False},
+                disqualification_reason=_obj_check.reason,
+            )
+
         # LOAD ACTUAL DATA FROM DATABASE
         if not metric:
             metric = await self._load_company_metrics(company.ticker)
@@ -114,28 +133,7 @@ class CompanySelectionPipeline:
             f"recent_buys={recent_insider_buys}, acquisitions={major_acquisitions_3yr}"
         )
 
-        # 1. FILTER AGENT — Hard metrics gates
-        _notify("filter")
-        filter_decision = await self.filter_agent.evaluate(
-            metrics=FilterMetrics(
-                gross_margin=metric.gross_margin if metric else None,
-                roic=metric.roic if metric else None,
-                revenue_growth_3yr=metric.revenue_growth_3yr_cagr if metric else None,
-                net_debt_ebitda=metric.net_debt_ebitda if metric else None,
-                net_income=metric.net_income if metric else None,
-            )
-        )
-        filter_results["filter"] = filter_decision
-        if not filter_decision.passed:
-            await self._record_decision(company.ticker, "filter", filter_decision)
-            return SelectionResult(
-                ticker=company.ticker,
-                passed_selection=False,
-                filter_results=filter_results,
-                disqualification_reason=filter_decision.reason,
-            )
-
-        # 2. BUSINESS MODEL AGENT — Clarity check
+        # 1. BUSINESS MODEL AGENT — Mandate compliance + clarity check
         _notify("business_model")
         business_decision = await self.business_model_agent.evaluate(
             ticker=company.ticker,
@@ -153,7 +151,7 @@ class CompanySelectionPipeline:
                 disqualification_reason=business_decision.reason,
             )
 
-        # 3. FOUNDER AGENT — Alignment check
+        # 2. FOUNDER AGENT — Alignment check
         _notify("founder")
         founder_decision = await self.founder_agent.evaluate(
             founder_ownership=founder_ownership,
@@ -171,7 +169,7 @@ class CompanySelectionPipeline:
                 disqualification_reason=founder_decision.reason,
             )
 
-        # 4. GROWTH AGENT — Growth quality
+        # 3. GROWTH AGENT — Growth quality
         _notify("growth")
         growth_decision = await self.growth_agent.evaluate(
             organic_revenue_growth=organic_revenue_growth,
@@ -190,7 +188,7 @@ class CompanySelectionPipeline:
                 disqualification_reason=growth_decision.reason,
             )
 
-        # 5. RED FLAG AGENT — Catch learned red flags
+        # 4. RED FLAG AGENT — Catch learned red flags
         _notify("red_flag")
         # Calculate derived metrics
         buyback_to_fcf_ratio = None
