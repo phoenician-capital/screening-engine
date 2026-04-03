@@ -362,9 +362,9 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
                 await asyncio.sleep(1)
         return None
 
-    # Parallel fetch
-    income_task    = asyncio.create_task(_fmp("income-statement"))
-    cashflow_task  = asyncio.create_task(_fmp("cash-flow-statement"))
+    # Parallel fetch — income/cashflow use limit=5 for 3yr CAGR (needs 4 data points)
+    income_task    = asyncio.create_task(_fmp("income-statement", limit=5))
+    cashflow_task  = asyncio.create_task(_fmp("cash-flow-statement", limit=5))
     metrics_task   = asyncio.create_task(_fmp("key-metrics"))
     ratios_task    = asyncio.create_task(_fmp("ratios"))
     profile_task   = asyncio.create_task(_fmp("profile"))
@@ -377,6 +377,7 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
     if not income_data or not isinstance(income_data, list) or not income_data:
         return None
 
+    # income_data is sorted newest-first by FMP (index 0 = latest year)
     inc  = income_data[0]
     inc1 = income_data[1] if len(income_data) > 1 else {}
     cf   = (cf_data or [{}])[0]
@@ -406,7 +407,13 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
     else:
         market_cap = market_cap_raw
 
-    # Revenue growth
+    # Revenue series oldest→newest (for CAGR). FMP returns newest-first so reverse.
+    rev_series_fmp = [
+        float(r["revenue"]) for r in reversed(income_data)
+        if r.get("revenue") and float(r["revenue"]) > 0
+    ]
+
+    # Revenue growth YoY
     rev_yoy = None
     rev1 = inc1.get("revenue") if inc1 else None
     if revenue and rev1 and rev1 > 0:
@@ -490,7 +497,7 @@ async def _fetch_fmp_financials(client: httpx.AsyncClient,
         "ebitda":               ebitda,
         "total_assets":         None,
         "equity":               None,
-        "rev_series":           [rev1, revenue] if rev1 and revenue else ([revenue] if revenue else []),
+        "rev_series":           rev_series_fmp if len(rev_series_fmp) >= 2 else ([rev1, revenue] if rev1 and revenue else ([revenue] if revenue else [])),
         "revenue_growth":       rev_yoy,
         "roic":                 roic,
         "roe":                  roe,
@@ -1362,12 +1369,22 @@ async def screen_universe_global(
                         if yts_fin and yts_fin.get("revenue"):
                             fin = yts_fin
                             source = "yahoo"
-                            # Carry forward FMP company metadata (name, description) if available
+                            # Carry forward ALL available FMP data — metadata AND ratio fields.
+                            # FMP key-metrics has pre-computed roic, net_debt_ebitda, fcf_yield
+                            # that Yahoo timeseries doesn't provide.
                             if fmp_fin and not fmp_fin.get("excluded"):
-                                for key in ("company_name", "description", "sector",
-                                            "website", "ceo_name", "is_founder_led",
-                                            "market_cap_fmp"):
-                                    if fmp_fin.get(key) and not fin.get(key):
+                                _fmp_carry = (
+                                    "company_name", "description", "sector",
+                                    "website", "ceo_name", "is_founder_led", "market_cap_fmp",
+                                    # ratio fields from FMP key-metrics — fill gaps Yahoo can't cover
+                                    "roic", "roe",
+                                    "net_debt_ebitda_direct", "fcf_yield_direct",
+                                    "ev_ebitda_direct", "capex_rev_direct",
+                                    "insider_ownership_pct",
+                                    "stock_repurchased", "stock_based_compensation", "acquisitions_net",
+                                )
+                                for key in _fmp_carry:
+                                    if fmp_fin.get(key) is not None and fin.get(key) is None:
                                         fin[key] = fmp_fin[key]
 
                     # ── Source 3: LLM web-search fallback (last resort) ──────────────
@@ -1381,11 +1398,12 @@ async def screen_universe_global(
                         if llm_fin and llm_fin.get("revenue"):
                             fin = llm_fin
                             source = "llm"
-                            # Carry forward any FMP/Yahoo metadata
+                            # Carry forward FMP metadata + ratio fields
                             if fmp_fin and not fmp_fin.get("excluded"):
-                                for key in ("company_name", "description", "sector",
-                                            "website", "ceo_name"):
-                                    if fmp_fin.get(key) and not fin.get(key):
+                                for key in ("company_name", "description", "sector", "website",
+                                            "ceo_name", "roic", "net_debt_ebitda_direct",
+                                            "fcf_yield_direct", "insider_ownership_pct"):
+                                    if fmp_fin.get(key) is not None and not fin.get(key):
                                         fin[key] = fmp_fin[key]
 
                     if not fin or fin.get("excluded"):
