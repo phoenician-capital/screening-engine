@@ -120,6 +120,8 @@ class ScoringPipeline:
         self.fit_scorer = FitScorer()
         self.risk_scorer = RiskScorer()
         self.ranker = Ranker()
+        self.last_run_id: uuid.UUID | None = None
+        self.last_screen_number: int | None = None
 
     async def run(
         self,
@@ -153,39 +155,33 @@ class ScoringPipeline:
         try:
             # 1. Create scoring run record with full config snapshot
             weights = load_scoring_weights()
+            await self.session.execute(
+                _text("SELECT pg_advisory_xact_lock(:lock_key)"),
+                {"lock_key": 20260403},
+            )
+            next_screen_number = int((
+                await self.session.execute(
+                    _text("SELECT COALESCE(MAX(screen_number), 0) + 1 FROM scoring_runs")
+                )
+            ).scalar_one())
             scoring_run = ScoringRun(
+                screen_number=next_screen_number,
                 run_type=run_type,
                 config_snapshot=weights,
             )
             self.session.add(scoring_run)
             await self.session.flush()
             scoring_run_id = scoring_run.id
+            self.last_run_id = scoring_run_id
+            self.last_screen_number = next_screen_number
+            await self.session.commit()
 
             on_progress(ScreeningProgress(step="init", status="starting"))
-
-            # Purge all stale recommendations for non-portfolio companies before the new run.
-            # Feedback rows are preserved (they carry analyst decisions used for learning)
-            # but their recommendation_id FK is nulled first to satisfy the constraint.
-            await self.session.execute(_text("""
-                WITH non_portfolio_recs AS (
-                    SELECT r.id
-                    FROM recommendations r
-                    WHERE r.ticker NOT IN (
-                        SELECT ticker FROM portfolio_holdings WHERE is_active = true
-                    )
-                )
-                UPDATE feedback
-                SET recommendation_id = NULL
-                WHERE recommendation_id IN (SELECT id FROM non_portfolio_recs)
-            """))
-            await self.session.execute(_text("""
-                DELETE FROM recommendations
-                WHERE ticker NOT IN (
-                    SELECT ticker FROM portfolio_holdings WHERE is_active = true
-                )
-            """))
-            await self.session.commit()
-            logger.info("Purged all stale non-portfolio recommendations before new run")
+            logger.info(
+                "Created scoring run #%s (%s) — preserving historical recommendations",
+                next_screen_number,
+                scoring_run_id,
+            )
 
             # 2. Get universe
             if tickers:
@@ -250,6 +246,7 @@ class ScoringPipeline:
                         # Get all recommendations from this scoring run and re-rank globally
                         all_recs = (await session.execute(
                             _select(Recommendation)
+                            .where(Recommendation.scoring_run_id == scoring_run_id)
                             .where(Recommendation.rank_score.isnot(None))
                             .where(Recommendation.rank_score > -50)
                             .order_by(Recommendation.rank_score.desc())
@@ -266,8 +263,12 @@ class ScoringPipeline:
                         deduped = list(seen_tickers.values())
                         deduped.sort(key=lambda r: float(r.rank_score or 0), reverse=True)
 
-                        # Clear all ranks first
-                        await session.execute(_update(Recommendation).values(rank=None))
+                        # Clear ranks only within this run
+                        await session.execute(
+                            _update(Recommendation)
+                            .where(Recommendation.scoring_run_id == scoring_run_id)
+                            .values(rank=None)
+                        )
 
                         # Assign new ranks
                         for i, rec in enumerate(deduped, 1):
@@ -282,7 +283,8 @@ class ScoringPipeline:
                         await session.commit()
 
                         logger.info(
-                            "Scoring complete: %d scored, %d ranked in %.1f seconds",
+                            "Scoring complete for screen #%s: %d scored, %d ranked in %.1f seconds",
+                            scoring_run.screen_number if scoring_run else next_screen_number,
                             len(companies),
                             len(deduped),
                             time.time() - t0,

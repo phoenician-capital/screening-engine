@@ -51,6 +51,34 @@ async def _run_startup_migrations() -> None:
             if cur.fetchone():
                 cur.execute(f"ALTER TABLE {table} RENAME COLUMN metadata TO pattern_metadata")
                 _log.info("Migration 013: renamed metadata → pattern_metadata in %s", table)
+
+        # Migration 014: add screen_number to scoring_runs for historical run versioning
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name='scoring_runs' AND column_name='screen_number'"
+        )
+        if not cur.fetchone():
+            cur.execute("ALTER TABLE scoring_runs ADD COLUMN screen_number INTEGER")
+            _log.info("Migration 014: added scoring_runs.screen_number")
+
+        cur.execute("""
+            WITH ordered_runs AS (
+                SELECT
+                    id,
+                    ROW_NUMBER() OVER (ORDER BY run_at ASC, id ASC) AS rn
+                FROM scoring_runs
+            )
+            UPDATE scoring_runs sr
+            SET screen_number = ordered_runs.rn
+            FROM ordered_runs
+            WHERE sr.id = ordered_runs.id
+              AND sr.screen_number IS NULL
+        """)
+        cur.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_scoring_runs_screen_number "
+            "ON scoring_runs (screen_number) "
+            "WHERE screen_number IS NOT NULL"
+        )
         cur.close()
         conn.close()
     except Exception as exc:

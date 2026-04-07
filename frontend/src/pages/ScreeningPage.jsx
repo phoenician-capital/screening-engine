@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import clsx from 'clsx'
+import { Link } from 'react-router-dom'
 import { api } from '../api'
 import AgentVisualization from '../components/AgentVisualization'
 import ScreeningProgress from '../components/ScreeningProgress'
@@ -74,7 +75,7 @@ export default function ScreeningPage() {
   useEffect(() => {
     api.screeningStatus().then(s => {
       if (s && (s.running || s.done)) setJob(s)
-      if (s?.done && !s.running) loadTopN()
+      if (s?.done && !s.running) loadTopN(s.run_id || null)
     }).catch(() => {})
   }, [])
 
@@ -125,16 +126,16 @@ export default function ScreeningPage() {
         setJob(s)
         if (s.done && !s.running) {
           clearInterval(id)
-          loadTopN()
+          loadTopN(s.run_id || null)
         }
       } catch {}
     }, 3500)
     return () => clearInterval(id)
   }, [job?.running])
 
-  const loadTopN = async () => {
+  const loadTopN = async (runId = null) => {
     try {
-      setTopN(await api.recommendations(10))
+      setTopN(await api.recommendations(10, runId))
     } catch {}
   }
 
@@ -258,6 +259,19 @@ export default function ScreeningPage() {
           animate={{ opacity: 1 }}
           transition={{ delay: 0.5 }}
         >
+          {job?.screen_number && job?.run_id && (
+            <div className="flex items-center justify-between mt-8 mb-3">
+              <div className="section-label">
+                Screen #{job.screen_number} saved
+              </div>
+              <Link
+                to={`/results?run=${job.run_id}`}
+                className="text-xs text-stone-400 hover:text-gold-600 transition"
+              >
+                View full results
+              </Link>
+            </div>
+          )}
           <MiniTable rows={topN} />
         </motion.div>
       )}

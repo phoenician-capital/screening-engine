@@ -1,7 +1,8 @@
-import { useState, useMemo } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import { Search, ChevronDown, ChevronUp, X, ExternalLink, ChevronRight } from 'lucide-react'
 import clsx from 'clsx'
+import { useSearchParams } from 'react-router-dom'
 import { useApi } from '../hooks/useApi'
 import { api } from '../api'
 import ScorePill from '../components/ScorePill'
@@ -129,6 +130,7 @@ const fmtCap  = v => {
   if (v >= 1e6) return `$${(v/1e6).toFixed(0)}M`
   return `$${v.toLocaleString()}`
 }
+const fmtRunDate = v => v ? new Date(v).toLocaleString() : '—'
 
 // ── Stats bar ─────────────────────────────────────────────────────────────────
 function StatsBar({ rows }) {
@@ -355,8 +357,8 @@ function DetailDrawer({ row, onClose, onFeedback }) {
   const handleFeedback = async (action, reason = null) => {
     setSubmitting(true)
     try {
-      await api.feedback(row.ticker, action, reason, analystNotes.trim() || null)
-      onFeedback(row.ticker, action)
+      await api.feedback(row.id, action, reason, analystNotes.trim() || null)
+      onFeedback(row.id, action)
       setFeedbackAction(null)
       setAnalystNotes('')
       setRejectReason('')
@@ -658,11 +660,38 @@ function ActionBtn({ label, color, active, disabled, onClick }) {
 
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function ResultsPage() {
-  const { data: rows, loading, error, reload } = useApi(() => api.recommendations(100), [])
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedRunId = searchParams.get('run')
+  const { data: runs, loading: runsLoading, reload: reloadRuns } = useApi(() => api.screeningRuns(60), [])
+  const selectedRunId = useMemo(() => {
+    if (!runs?.length) return null
+    if (requestedRunId && runs.some(run => run.id === requestedRunId)) return requestedRunId
+    return runs[0].id
+  }, [runs, requestedRunId])
+  const selectedRun = useMemo(
+    () => runs?.find(run => run.id === selectedRunId) ?? null,
+    [runs, selectedRunId]
+  )
+  const { data: rows, loading, error, reload } = useApi(
+    () => (selectedRunId ? api.recommendations(100, selectedRunId) : []),
+    [selectedRunId]
+  )
   const [selected, setSelected] = useState(null)
   const [filters, setFilters]   = useState({
     search: '', minFit: '0', maxRisk: '100', status: '', sector: '', sort: 'score'
   })
+
+  useEffect(() => {
+    if (!selectedRunId) return
+    if (requestedRunId === selectedRunId) return
+    const next = new URLSearchParams(searchParams)
+    next.set('run', selectedRunId)
+    setSearchParams(next, { replace: true })
+  }, [requestedRunId, searchParams, selectedRunId, setSearchParams])
+
+  useEffect(() => {
+    setSelected(null)
+  }, [selectedRunId])
 
   const filtered = useMemo(() => {
     if (!rows) return []
@@ -685,12 +714,17 @@ export default function ResultsPage() {
     return out
   }, [rows, filters])
 
-  const selectedRow = selected ? filtered.find(r => r.ticker === selected) : null
+  const selectedRow = selected ? filtered.find(r => r.id === selected) : null
 
-  const handleFeedback = (ticker, action) => {
-    // Optimistic update
+  const handleFeedback = () => {
     reload()
+    reloadRuns()
     setSelected(null)
+  }
+
+  const refreshAll = () => {
+    reload()
+    reloadRuns()
   }
 
   return (
@@ -721,13 +755,46 @@ export default function ResultsPage() {
                 Ranked Universe
               </h2>
             </div>
-            <button
-              onClick={reload}
-              className="text-xs text-stone-400 hover:text-gold-600 transition flex items-center gap-1.5 pb-1"
-            >
-              Refresh
-            </button>
+            <div className="flex items-end gap-3">
+              <div>
+                <div className="section-label mb-2">Screen</div>
+                <select
+                  value={selectedRunId ?? ''}
+                  onChange={e => {
+                    const next = new URLSearchParams(searchParams)
+                    next.set('run', e.target.value)
+                    setSearchParams(next)
+                  }}
+                  disabled={runsLoading || !runs?.length}
+                  className="min-w-[240px] py-2 px-3 text-sm bg-white border border-stone-200 rounded-xs
+                             focus:outline-none focus:border-gold-400 text-stone-700"
+                >
+                  {(runs || []).map(run => (
+                    <option key={run.id} value={run.id}>
+                      {run.label} · {run.run_type} · {new Date(run.run_at).toLocaleDateString()}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                onClick={refreshAll}
+                className="text-xs text-stone-400 hover:text-gold-600 transition flex items-center gap-1.5 pb-1"
+              >
+                Refresh
+              </button>
+            </div>
           </div>
+
+          {selectedRun && (
+            <div className="flex items-center gap-4 mb-5 text-xs text-stone-500">
+              <span className="tag bg-stone-100 text-stone-700 border border-stone-200">
+                {selectedRun.label}
+              </span>
+              <span>{selectedRun.run_type.replace(/_/g, ' ')}</span>
+              <span>{fmtRunDate(selectedRun.run_at)}</span>
+              <span>{selectedRun.tickers_passed_filter} passed / {selectedRun.tickers_scored} scored</span>
+            </div>
+          )}
 
           {loading && <div className="mb-4"><TableSkeleton rows={4} cols={10} /></div>}
           {error   && (
@@ -769,11 +836,11 @@ export default function ResultsPage() {
                 <tbody>
                   {filtered.map((row, i) => (
                     <TableRow
-                      key={row.ticker}
+                      key={row.id}
                       row={row}
                       rank={row.rank ?? (i + 1)}
-                      selected={selected === row.ticker}
-                      onClick={() => setSelected(selected === row.ticker ? null : row.ticker)}
+                      selected={selected === row.id}
+                      onClick={() => setSelected(selected === row.id ? null : row.id)}
                     />
                   ))}
                 </tbody>

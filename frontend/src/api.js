@@ -17,9 +17,14 @@ async function post(path, body) {
 }
 
 export const api = {
-  recommendations: (limit = 500) => get(`/recommendations?limit=${limit}`),
-  feedback: (ticker, action, reason = null, notes = null) =>
-    post(`/recommendations/${ticker}/feedback`, { action, reason, notes }),
+  recommendations: (limit = 500, scoringRunId = null) => {
+    const params = new URLSearchParams({ limit: String(limit) })
+    if (scoringRunId) params.set('scoring_run_id', scoringRunId)
+    return get(`/recommendations?${params.toString()}`)
+  },
+  screeningRuns: (limit = 50) => get(`/screening/runs?limit=${limit}`),
+  feedback: (recommendationId, action, reason = null, notes = null) =>
+    post(`/recommendations/by-id/${recommendationId}/feedback`, { action, reason, notes }),
 
   startScreening: (max_companies = 20) =>
     post('/screening/run', { max_companies }),

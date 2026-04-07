@@ -115,12 +115,17 @@ CREATE INDEX idx_embeddings_vector ON embeddings USING ivfflat (embedding vector
 -- ── Scoring Runs ────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS scoring_runs (
     id                      UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    screen_number           INTEGER,
     run_type                VARCHAR(20) NOT NULL,
     tickers_scored          INTEGER DEFAULT 0,
     tickers_passed_filter   INTEGER DEFAULT 0,
     config_snapshot         JSONB,
     run_at                  TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_scoring_runs_screen_number
+    ON scoring_runs (screen_number)
+    WHERE screen_number IS NOT NULL;
 
 -- ── Recommendations ─────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS recommendations (

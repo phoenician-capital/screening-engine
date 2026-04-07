@@ -20,6 +20,7 @@ class ScoringRun(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
+    screen_number: Mapped[int | None] = mapped_column(Integer, index=True)
     run_type: Mapped[str] = mapped_column(String(20))  # daily | weekly | manual
     tickers_scored: Mapped[int] = mapped_column(Integer, default=0)
     tickers_passed_filter: Mapped[int] = mapped_column(Integer, default=0)
@@ -29,4 +30,4 @@ class ScoringRun(Base):
     )
 
     def __repr__(self) -> str:
-        return f"<ScoringRun {self.run_type} {self.run_at}>"
+        return f"<ScoringRun #{self.screen_number} {self.run_type} {self.run_at}>"

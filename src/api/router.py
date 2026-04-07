@@ -14,7 +14,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel, field_validator
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 
 from src.config.settings import settings
 
@@ -61,6 +63,194 @@ def _fmt_cap(v) -> str:
     return f"${v:,.0f}"
 
 
+async def _list_scoring_runs(
+    session: AsyncSession,
+    limit: int = 50,
+    include_portfolio: bool = False,
+):
+    from src.db.models.scoring_run import ScoringRun
+
+    stmt = select(ScoringRun)
+    if not include_portfolio:
+        stmt = stmt.where(ScoringRun.run_type != "portfolio_scan")
+    stmt = stmt.order_by(
+        ScoringRun.screen_number.desc().nullslast(),
+        ScoringRun.run_at.desc(),
+    ).limit(limit)
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+async def _get_latest_scoring_run(
+    session: AsyncSession,
+    include_portfolio: bool = False,
+):
+    runs = await _list_scoring_runs(session, limit=1, include_portfolio=include_portfolio)
+    return runs[0] if runs else None
+
+
+async def _build_recommendation_rows(
+    session: AsyncSession,
+    recs: list,
+):
+    from src.db.repositories.company_repo import CompanyRepository
+    from src.db.repositories.metric_repo import MetricRepository
+
+    co_repo = CompanyRepository(session)
+    met_repo = MetricRepository(session)
+
+    tickers = [r.ticker for r in recs]
+    try:
+        companies = await co_repo.get_many_by_tickers(tickers) if hasattr(co_repo, "get_many_by_tickers") else {}
+        metrics = await met_repo.get_many_latest(tickers) if hasattr(met_repo, "get_many_latest") else {}
+    except Exception:
+        companies, metrics = {}, {}
+
+    rows = []
+    for r in recs:
+        co = companies.get(r.ticker) if isinstance(companies, dict) else None
+        met = metrics.get(r.ticker) if isinstance(metrics, dict) else None
+
+        if not co:
+            try:
+                co = await co_repo.get_by_ticker(r.ticker)
+            except Exception:
+                co = None
+        if not met:
+            try:
+                met = await met_repo.get_latest(r.ticker)
+            except Exception:
+                met = None
+
+        sd = r.scoring_detail or {}
+        criteria = sd.get("criteria", [])
+        company_snapshot = sd.get("company_snapshot") or {}
+        metric_snapshot = sd.get("metric_snapshot") or {}
+
+        thesis_entry = next((c for c in criteria if c.get("name") == "analyst_thesis"), None)
+        thesis, diligence, verdict = "", [], ""
+        if thesis_entry:
+            ev = thesis_entry.get("evidence", "")
+            if "THESIS:" in ev:
+                thesis = ev.split("THESIS:")[1].split("|")[0].strip()
+            if "DILIGENCE:" in ev:
+                dil = ev.split("DILIGENCE:")[1]
+                if "VERDICT:" in dil:
+                    dil = dil.split("VERDICT:")[0]
+                diligence = [q.strip() for q in dil.split("|") if q.strip()]
+            if "VERDICT:" in ev:
+                verdict = ev.split("VERDICT:")[1].strip()
+
+        agent_dims = {"business_quality", "unit_economics", "capital_returns",
+                      "growth_quality", "balance_sheet", "phoenician_fit"}
+        dimensions = []
+        for c in criteria:
+            if c.get("name") in agent_dims and c.get("max_score", 0) > 0:
+                mx = c["max_score"]
+                sc = c["score"]
+                ev = c.get("evidence", "")
+                if ev.startswith("[Agent"):
+                    ev = ev.split("] ", 1)[-1] if "] " in ev else ev
+                dimensions.append({
+                    "name": c["name"],
+                    "label": c["name"].replace("_", " ").title(),
+                    "score": round(sc / mx * 100) if mx else 0,
+                    "evidence": ev,
+                })
+
+        bear_case, dcf_result = [], ""
+        if thesis_entry:
+            ev = thesis_entry.get("evidence", "")
+            if "BEAR CASE:" in ev:
+                bear_raw = ev.split("BEAR CASE:")[1]
+                if "DCF:" in bear_raw:
+                    bear_raw = bear_raw.split("DCF:")[0]
+                elif "DILIGENCE:" in bear_raw:
+                    bear_raw = bear_raw.split("DILIGENCE:")[0]
+                bear_case = [b.strip() for b in bear_raw.split("|") if b.strip()]
+            if "DCF:" in ev:
+                dcf_raw = ev.split("DCF:")[1]
+                if "DCF reasoning:" in dcf_raw:
+                    dcf_raw = dcf_raw.split("DCF reasoning:")[0]
+                elif "DILIGENCE:" in dcf_raw:
+                    dcf_raw = dcf_raw.split("DILIGENCE:")[0]
+                dcf_result = dcf_raw.strip().split("|")[0].strip()
+
+        market_cap_raw = company_snapshot.get("market_cap_usd")
+        if market_cap_raw is None and co and co.market_cap_usd is not None:
+            market_cap_raw = float(co.market_cap_usd)
+
+        rows.append({
+            "id": str(r.id),
+            "scoring_run_id": str(r.scoring_run_id) if r.scoring_run_id else None,
+            "rank": r.rank,
+            "ticker": r.ticker,
+            "name": company_snapshot.get("name") or (co.name if co else ""),
+            "exchange": company_snapshot.get("exchange") or (co.exchange if co else ""),
+            "country": company_snapshot.get("country") or (co.country if co else ""),
+            "sector": company_snapshot.get("sector") or (co.gics_sector if co else ""),
+            "founder_led": (
+                company_snapshot.get("founder_led")
+                if company_snapshot.get("founder_led") is not None
+                else (co.is_founder_led if co else False)
+            ),
+            "discovery_source": company_snapshot.get("discovery_source") or (getattr(co, "discovery_source", None) if co else None),
+            "market_tier": company_snapshot.get("market_tier") or (getattr(co, "market_tier", 1) if co else 1),
+            "market_cap": _f(market_cap_raw) if market_cap_raw is not None else None,
+            "market_cap_fmt": _fmt_cap(market_cap_raw),
+            "fit_score": _f(r.fit_score),
+            "risk_score": _f(r.risk_score),
+            "rank_score": _f(r.rank_score),
+            "status": r.status,
+            "inspired_by": r.inspired_by,
+            "gross_margin": (
+                _pct(metric_snapshot.get("gross_margin"))
+                if metric_snapshot.get("gross_margin") is not None
+                else (_pct(met.gross_margin) if met else None)
+            ),
+            "roic": (
+                _pct(metric_snapshot.get("roic"))
+                if metric_snapshot.get("roic") is not None
+                else (_pct(met.roic) if met else None)
+            ),
+            "fcf_yield": (
+                _pct(metric_snapshot.get("fcf_yield"))
+                if metric_snapshot.get("fcf_yield") is not None
+                else (_pct(met.fcf_yield) if met else None)
+            ),
+            "revenue_growth_yoy": (
+                _pct(metric_snapshot.get("revenue_growth_yoy"))
+                if metric_snapshot.get("revenue_growth_yoy") is not None
+                else (_pct(met.revenue_growth_yoy) if met else None)
+            ),
+            "net_debt_ebitda": (
+                _f(metric_snapshot.get("net_debt_ebitda"))
+                if metric_snapshot.get("net_debt_ebitda") is not None
+                else (_f(met.net_debt_ebitda) if met else None)
+            ),
+            "ev_ebit": (
+                _f(metric_snapshot.get("ev_ebit"))
+                if metric_snapshot.get("ev_ebit") is not None
+                else (_f(met.ev_ebit) if met else None)
+            ),
+            "analyst_count": (
+                metric_snapshot.get("analyst_count")
+                if metric_snapshot.get("analyst_count") is not None
+                else (met.analyst_count if met else None)
+            ),
+            "memo_text": r.memo_text,
+            "thesis": thesis,
+            "diligence": diligence,
+            "verdict": verdict,
+            "dimensions": dimensions,
+            "bear_case": bear_case,
+            "dcf_result": dcf_result,
+            "portfolio_comparison": r.portfolio_comparison,
+        })
+
+    return rows
+
+
 # ── Global screening job state ─────────────────────────────────────────────────
 _SCREENING_JOB: dict = {}
 _SCREENING_LOCK = threading.Lock()
@@ -82,149 +272,56 @@ _SSE_LOCK = threading.Lock()
 # ══════════════════════════════════════════════════════════════════════════════
 
 @router.get("/recommendations")
-async def get_recommendations(limit: int = Query(100, le=1000)):
-    """Top-ranked recommendations with company and metric data — portfolio holdings excluded."""
+async def get_recommendations(
+    limit: int = Query(100, le=1000),
+    scoring_run_id: _uuid.UUID | None = Query(None),
+):
+    """Recommendations for a selected screening run, or the latest run by default."""
     async with _session_factory() as session:
+            from src.db.models.scoring_run import ScoringRun
             from src.db.repositories.recommendation_repo import RecommendationRepository
-            from src.db.repositories.company_repo import CompanyRepository
-            from src.db.repositories.metric_repo import MetricRepository
-            from src.db.repositories.portfolio_repo import PortfolioRepository
 
-            rec_repo  = RecommendationRepository(session)
-            co_repo   = CompanyRepository(session)
-            met_repo  = MetricRepository(session)
-            port_repo = PortfolioRepository(session)
+            rec_repo = RecommendationRepository(session)
 
-            try:
-                portfolio_holdings = await port_repo.get_active()
-                portfolio_tickers  = {h.ticker for h in portfolio_holdings}
-            except Exception:
-                portfolio_tickers = set()
+            if scoring_run_id is None:
+                latest_run = await _get_latest_scoring_run(session)
+                if latest_run is None:
+                    return []
+                scoring_run_id = latest_run.id
+            else:
+                run = await session.get(ScoringRun, scoring_run_id)
+                if run is None:
+                    raise HTTPException(404, f"Scoring run not found: {scoring_run_id}")
 
-            # Fetch a larger batch to account for portfolio filtering
-            try:
-                all_recs = await rec_repo.get_top_ranked(limit=min(limit * 2, 1000))
-            except Exception:
-                all_recs = []
+            recs = list(await rec_repo.get_by_scoring_run(scoring_run_id))
+            recs = recs[:limit]
+            return await _build_recommendation_rows(session, recs)
 
-            recs = [r for r in all_recs if r.ticker not in portfolio_tickers][:limit]
 
-            # Batch fetch companies and metrics for all recs at once (not one-by-one)
-            tickers = [r.ticker for r in recs]
-            try:
-                companies = await co_repo.get_many_by_tickers(tickers) if hasattr(co_repo, 'get_many_by_tickers') else {}
-                metrics = await met_repo.get_many_latest(tickers) if hasattr(met_repo, 'get_many_latest') else {}
-            except Exception:
-                companies, metrics = {}, {}
-
-            rows = []
-            for r in recs:
-                co  = companies.get(r.ticker) if isinstance(companies, dict) else None
-                met = metrics.get(r.ticker) if isinstance(metrics, dict) else None
-
-                if not co:
-                    try:
-                        co = await co_repo.get_by_ticker(r.ticker)
-                    except Exception:
-                        co = None
-                if not met:
-                    try:
-                        met = await met_repo.get_latest(r.ticker)
-                    except Exception:
-                        met = None
-
-                # Parse analyst thesis from scoring_detail
-                sd       = r.scoring_detail or {}
-                criteria = sd.get("criteria", [])
-                thesis_entry = next((c for c in criteria if c.get("name") == "analyst_thesis"), None)
-                thesis, diligence, verdict, analyst_note = "", [], "", ""
-                if thesis_entry:
-                    ev = thesis_entry.get("evidence", "")
-                    if "THESIS:" in ev:
-                        thesis = ev.split("THESIS:")[1].split("|")[0].strip()
-                    if "DILIGENCE:" in ev:
-                        dil = ev.split("DILIGENCE:")[1]
-                        if "VERDICT:" in dil:
-                            dil = dil.split("VERDICT:")[0]
-                        diligence = [q.strip() for q in dil.split("|") if q.strip()]
-                    if "VERDICT:" in ev:
-                        verdict = ev.split("VERDICT:")[1].strip()
-
-                # Agent dimension scores
-                agent_dims = {"business_quality", "unit_economics", "capital_returns",
-                              "growth_quality", "balance_sheet", "phoenician_fit"}
-                dimensions = []
-                for c in criteria:
-                    if c.get("name") in agent_dims and c.get("max_score", 0) > 0:
-                        mx  = c["max_score"]
-                        sc  = c["score"]
-                        raw = round(sc / mx * 100) if mx else 0
-                        ev  = c.get("evidence", "")
-                        if ev.startswith("[Agent"):
-                            ev = ev.split("] ", 1)[-1] if "] " in ev else ev
-                        dimensions.append({
-                            "name":     c["name"],
-                            "label":    c["name"].replace("_", " ").title(),
-                            "score":    raw,
-                            "evidence": ev,  # full evidence — no truncation
-                        })
-
-                # Bear case + DCF from analyst_thesis evidence
-                bear_case, dcf_result = [], ""
-                if thesis_entry:
-                    ev = thesis_entry.get("evidence", "")
-                    if "BEAR CASE:" in ev:
-                        bear_raw = ev.split("BEAR CASE:")[1]
-                        if "DCF:" in bear_raw:
-                            bear_raw = bear_raw.split("DCF:")[0]
-                        elif "DILIGENCE:" in bear_raw:
-                            bear_raw = bear_raw.split("DILIGENCE:")[0]
-                        bear_case = [b.strip() for b in bear_raw.split("|") if b.strip()]
-                    if "DCF:" in ev:
-                        dcf_raw = ev.split("DCF:")[1]
-                        if "DCF reasoning:" in dcf_raw:
-                            dcf_raw = dcf_raw.split("DCF reasoning:")[0]
-                        elif "DILIGENCE:" in dcf_raw:
-                            dcf_raw = dcf_raw.split("DILIGENCE:")[0]
-                        dcf_result = dcf_raw.strip().split("|")[0].strip()
-
-                rows.append({
-                    "id":           str(r.id),
-                    "rank":         r.rank,
-                    "ticker":       r.ticker,
-                    "name":         co.name         if co else "",
-                    "exchange":          co.exchange           if co else "",
-                    "country":           co.country            if co else "",
-                    "sector":            co.gics_sector        if co else "",
-                    "founder_led":       co.is_founder_led     if co else False,
-                    "discovery_source":  getattr(co, "discovery_source", None) if co else None,
-                    "market_tier":       getattr(co, "market_tier", 1)          if co else 1,
-                    "market_cap":   _f(co.market_cap_usd) if co and co.market_cap_usd else None,
-                    "market_cap_fmt": _fmt_cap(co.market_cap_usd if co else None),
-                    "fit_score":    _f(r.fit_score),
-                    "risk_score":   _f(r.risk_score),
-                    "rank_score":   _f(r.rank_score),
-                    "status":       r.status,
-                    "inspired_by":  r.inspired_by,
-                    # Financials
-                    "gross_margin":       _pct(met.gross_margin)        if met else None,
-                    "roic":               _pct(met.roic)                if met else None,
-                    "fcf_yield":          _pct(met.fcf_yield)           if met else None,
-                    "revenue_growth_yoy": _pct(met.revenue_growth_yoy)  if met else None,
-                    "net_debt_ebitda":    _f(met.net_debt_ebitda)       if met else None,
-                    "ev_ebit":            _f(met.ev_ebit)               if met else None,
-                    "analyst_count":      met.analyst_count             if met else None,
-                    # AI outputs
-                    "memo_text":         r.memo_text,
-                    "thesis":            thesis,
-                    "diligence":         diligence,
-                    "verdict":           verdict,
-                    "dimensions":        dimensions,
-                    "bear_case":         bear_case,
-                    "dcf_result":        dcf_result,
-                    "portfolio_comparison": r.portfolio_comparison,
-                })
-            return rows
+@router.get("/screening/runs")
+async def get_screening_runs(
+    limit: int = Query(50, le=200),
+    include_portfolio: bool = Query(False),
+):
+    """List saved screening runs for historical result selection."""
+    async with _session_factory() as session:
+        runs = await _list_scoring_runs(session, limit=limit, include_portfolio=include_portfolio)
+        return [
+            {
+                "id": str(run.id),
+                "screen_number": run.screen_number,
+                "run_type": run.run_type,
+                "tickers_scored": run.tickers_scored,
+                "tickers_passed_filter": run.tickers_passed_filter,
+                "run_at": run.run_at.isoformat() if run.run_at else None,
+                "label": (
+                    f"Screen #{run.screen_number}"
+                    if run.screen_number is not None
+                    else f"Run {str(run.id)[:8]}"
+                ),
+            }
+            for run in runs
+        ]
 
 
 class FeedbackBody(BaseModel):
@@ -239,46 +336,70 @@ class FeedbackBody(BaseModel):
         return v[:2000] if v else v
 
 
+async def _store_feedback_for_recommendation(rec, body: FeedbackBody, session: AsyncSession):
+    from src.db.models.feedback import Feedback
+    from src.db.repositories.recommendation_repo import RecommendationRepository
+    from src.orchestration.pipelines.bidirectional_feedback_pipeline import (
+        BidirectionalFeedbackPipeline,
+    )
+
+    repo = RecommendationRepository(session)
+    fb = Feedback(
+        recommendation_id=rec.id,
+        ticker=rec.ticker,
+        action=body.action,
+        reject_reason=body.reason,
+        notes=body.notes,
+    )
+    session.add(fb)
+
+    status_map = {"research_now": "researching", "watch": "watched", "reject": "rejected"}
+    if body.action in status_map:
+        await repo.update_status(rec.id, status_map[body.action])
+
+    await session.flush()
+
+    try:
+        pipeline = BidirectionalFeedbackPipeline(session)
+        await pipeline.process_feedback(fb)
+        logger.info("Bidirectional feedback learning triggered for %s", rec.ticker)
+    except Exception as e:
+        logger.error("Feedback learning failed for %s: %s", rec.ticker, e)
+
+    await session.commit()
+    return {
+        "ok": True,
+        "ticker": rec.ticker,
+        "action": body.action,
+        "recommendation_id": str(rec.id),
+    }
+
+
+@router.post("/recommendations/by-id/{recommendation_id}/feedback")
+async def submit_feedback_by_recommendation_id(
+    recommendation_id: _uuid.UUID,
+    body: FeedbackBody,
+):
+    async with _session_factory() as session:
+            from src.db.repositories.recommendation_repo import RecommendationRepository
+
+            repo = RecommendationRepository(session)
+            rec = await repo.get_by_id(recommendation_id)
+            if not rec:
+                raise HTTPException(404, f"No recommendation found for id {recommendation_id}")
+            return await _store_feedback_for_recommendation(rec, body, session)
+
+
 @router.post("/recommendations/{ticker}/feedback")
 async def submit_feedback(ticker: str, body: FeedbackBody):
     async with _session_factory() as session:
-            from src.db.models.feedback import Feedback
             from src.db.repositories.recommendation_repo import RecommendationRepository
-            from src.orchestration.pipelines.bidirectional_feedback_pipeline import (
-                BidirectionalFeedbackPipeline,
-            )
 
             repo = RecommendationRepository(session)
             rec  = await repo.get_latest_for_ticker(ticker)
             if not rec:
                 raise HTTPException(404, f"No recommendation found for {ticker}")
-
-            fb = Feedback(
-                recommendation_id=rec.id,
-                ticker=ticker,
-                action=body.action,
-                reject_reason=body.reason,
-                notes=body.notes,  # NEW: Store analyst notes
-            )
-            session.add(fb)
-
-            status_map = {"research_now": "researching", "watch": "watched", "reject": "rejected"}
-            if body.action in status_map:
-                await repo.update_status(rec.id, status_map[body.action])
-
-            await session.flush()
-
-            # NEW: Trigger bidirectional learning pipeline
-            try:
-                pipeline = BidirectionalFeedbackPipeline(session)
-                await pipeline.process_feedback(fb)
-                logger.info(f"Bidirectional feedback learning triggered for {ticker}")
-            except Exception as e:
-                logger.error(f"Feedback learning failed for {ticker}: {e}")
-                # Don't block feedback submission on learning failure
-
-            await session.commit()
-            return {"ok": True, "ticker": ticker, "action": body.action}
+            return await _store_feedback_for_recommendation(rec, body, session)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -360,6 +481,7 @@ async def start_screening(body: RunScreeningBody):
             "step": 1, "step_label": "Discovering companies",
             "tickers_found": 0, "scored": 0, "top_n": [],
             "d1": "", "d2": "", "d3": "", "d4": "",
+            "run_id": None, "screen_number": None,
             "t0": time.time(), "elapsed": 0,
         })
 
@@ -439,15 +561,29 @@ async def start_screening(body: RunScreeningBody):
             _SCREENING_JOB.update({
                 "scored": len(scored) if isinstance(scored, list) else 0,
                 "d2": f"{_SCREENING_JOB['scored']} companies · {time.time()-t2:.1f}s",
+                "run_id": str(pipe.last_run_id) if pipe.last_run_id else None,
+                "screen_number": pipe.last_screen_number,
                 "step": "complete", "step_label": "Complete",
             })
-            _emit_event("screening_complete", scored=len(scored) if isinstance(scored, list) else 0, elapsed=time.time()-t2)
+            _emit_event(
+                "screening_complete",
+                scored=len(scored) if isinstance(scored, list) else 0,
+                elapsed=time.time()-t2,
+                run_id=str(pipe.last_run_id) if pipe.last_run_id else None,
+                screen_number=pipe.last_screen_number,
+            )
             _SCREENING_JOB.update({
                 "d3": "Rankings saved to database",
                 "done": True, "running": False,
                 "elapsed": round(time.time() - t0),
             })
-            _emit_event("screening_done", done=True, elapsed=round(time.time()-t0))
+            _emit_event(
+                "screening_done",
+                done=True,
+                elapsed=round(time.time()-t0),
+                run_id=str(pipe.last_run_id) if pipe.last_run_id else None,
+                screen_number=pipe.last_screen_number,
+            )
         except Exception as e:
             logger.exception(f"Background screening error: {e}")
             _SCREENING_JOB.update({"error": str(e), "done": True, "running": False})
@@ -486,6 +622,7 @@ async def start_portfolio_scan():
             "step": 1, "step_label": "Fetching portfolio data",
             "tickers_found": 0, "scored": 0, "top_n": [],
             "d1": "", "d2": "", "d3": "", "d4": "",
+            "run_id": None, "screen_number": None,
             "t0": time.time(), "elapsed": 0,
         })
 
@@ -547,6 +684,8 @@ async def start_portfolio_scan():
             _SCREENING_JOB.update({
                 "scored": len(scored) if isinstance(scored, list) else 0,
                 "d2": f"{_SCREENING_JOB['scored']} holdings scored · {time.time()-t2:.1f}s",
+                "run_id": str(pipe.last_run_id) if pipe.last_run_id else None,
+                "screen_number": pipe.last_screen_number,
                 "d3": "Rankings saved to database",
                 "step": 3, "done": True, "running": False,
                 "elapsed": round(time.time() - t0),

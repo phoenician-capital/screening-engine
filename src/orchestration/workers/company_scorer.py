@@ -215,6 +215,32 @@ class SingleCompanyScorer:
                     return None
 
                 all_criteria = [c.model_dump() for c in fit_criteria + risk_criteria]
+                def _to_float(value):
+                    return float(value) if value is not None else None
+
+                company_snapshot = {
+                    "name": company.name,
+                    "exchange": company.exchange,
+                    "country": company.country,
+                    "sector": company.gics_sector,
+                    "founder_led": company.is_founder_led,
+                    "discovery_source": getattr(company, "discovery_source", None),
+                    "market_tier": getattr(company, "market_tier", 1),
+                    "market_cap_usd": _to_float(
+                        metrics.market_cap_usd
+                        if metrics.market_cap_usd is not None
+                        else company.market_cap_usd
+                    ),
+                }
+                metric_snapshot = {
+                    "gross_margin": _to_float(metrics.gross_margin),
+                    "roic": _to_float(metrics.roic),
+                    "fcf_yield": _to_float(metrics.fcf_yield),
+                    "revenue_growth_yoy": _to_float(metrics.revenue_growth_yoy),
+                    "net_debt_ebitda": _to_float(metrics.net_debt_ebitda),
+                    "ev_ebit": _to_float(metrics.ev_ebit),
+                    "analyst_count": metrics.analyst_count,
+                }
 
                 # 10. Generate memo
                 memo_text, portfolio_comparison = await generate_memo(
@@ -236,7 +262,11 @@ class SingleCompanyScorer:
                     rank_score=rank_score,
                     memo_text=memo_text,
                     portfolio_comparison=portfolio_comparison,
-                    scoring_detail={"criteria": all_criteria},
+                    scoring_detail={
+                        "criteria": all_criteria,
+                        "company_snapshot": company_snapshot,
+                        "metric_snapshot": metric_snapshot,
+                    },
                 )
                 session.add(rec)
 
